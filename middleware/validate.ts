@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodSchema, ZodIssue } from "zod";
+import { isDevelopment } from "../config/appConfig";
 
 type RequestPart = "body" | "params" | "query";
 
@@ -13,15 +14,24 @@ export const validate = (schema: ZodSchema, part: RequestPart = "body") => {
     const result = schema.safeParse(req[part]);
 
     if (!result.success) {
-      const errors = result.error.issues.map((e: ZodIssue) => ({
-        field: e.path.join("."),
-        message: e.message,
-      }));
+      const errors = result.error.issues.map((e: ZodIssue) => {
+        const base: Record<string, unknown> = {
+          field: e.path.join("."),
+          message: e.message,
+        };
+        if (isDevelopment()) {
+          base["code"] = e.code;
+          if ("expected" in e) base["expected"] = e.expected;
+          if ("received" in e) base["received"] = e.received;
+        }
+        return base;
+      });
 
       res.status(400).json({
         status: 400,
         message: "Validation failed",
         errors,
+        ...(isDevelopment() ? { received: req[part] } : {}),
       });
       return;
     }

@@ -12,6 +12,7 @@ import { isDevelopment } from "../config/appConfig";
 import { User } from "../models/User";
 
 const REFRESH_COOKIE = "refreshToken";
+const REFRESH_COOKIE_PATH = "/api/v1/auth";
 
 // ─── POST /auth/login ─────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ export const loginHandler = async (req: Request, res: Response): Promise<void> =
     httpOnly: true,
     secure: !isDevelopment(),   // HTTPS only in production
     sameSite: "strict",         // no cross-site sending → CSRF protection
+    path: REFRESH_COOKIE_PATH,  // only sent to auth endpoints
     maxAge,
   });
 
@@ -87,18 +89,15 @@ export const refreshHandler = async (req: Request, res: Response): Promise<void>
     .populate<{ groups: { name: string }[] }>("groups", "name")
     .lean();
 
-  const user: AuthenticatedUser = dbUser
-    ? {
-        username: dbUser.username,
-        role: dbUser.role,
-        groups: dbUser.groups.map((g) => g.name),
-      }
-    : {
-        // Fallback to token values if the user record doesn't exist yet
-        username: payload.sub,
-        role: payload.role,
-        groups: payload.groups,
-      };
+  if (!dbUser) {
+    throw new UnauthorizedError("User no longer exists", "AuthController");
+  }
+
+  const user: AuthenticatedUser = {
+    username: dbUser.username,
+    role: dbUser.role,
+    groups: dbUser.groups.map((g) => g.name),
+  };
 
   const accessToken = generateAccessToken(user);
 
@@ -142,6 +141,7 @@ export const logoutHandler = async (req: Request, res: Response): Promise<void> 
     httpOnly: true,
     secure: !isDevelopment(),
     sameSite: "strict",
+    path: REFRESH_COOKIE_PATH,
   });
 
   const username = (req.user as AuthenticatedUser).username;
@@ -153,18 +153,26 @@ export const logoutHandler = async (req: Request, res: Response): Promise<void> 
 // ─── GET /auth/me ─────────────────────────────────────────────────────────────
 
 /**
- * Returns the profile of the currently authenticated user decoded from the
- * access token. No database lookup — the token is the source of truth.
+ * Returns the current user's profile from the database.
+ * This is the authoritative source of user info — not the token.
  *
  * Response 200: { username, role, groups }
- * Response 401: not authenticated
+ * Response 401: not authenticated or user no longer exists
  */
 export const meHandler = async (req: Request, res: Response): Promise<void> => {
-  const user = req.user as AuthenticatedUser;
+  const { username } = req.user as AuthenticatedUser;
+
+  const dbUser = await User.findOne({ username })
+    .populate<{ groups: { name: string }[] }>("groups", "name")
+    .lean();
+
+  if (!dbUser) {
+    throw new UnauthorizedError("User no longer exists", "AuthController");
+  }
 
   res.status(200).json({
-    username: user.username,
-    role: user.role,
-    groups: user.groups,
+    username: dbUser.username,
+    role: dbUser.role,
+    groups: dbUser.groups.map((g) => g.name),
   });
 };

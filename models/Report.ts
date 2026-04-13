@@ -27,9 +27,6 @@ export interface IReport extends Document {
   /** Full report payload — structure TBD. */
   content: Record<string, unknown>;
 
-  /** Group this report belongs to — references the Group collection. */
-  group: Types.ObjectId;
-
   /** Lifecycle stage of the report. */
   status: ReportStatus;
 
@@ -78,13 +75,6 @@ const ReportSchema = new Schema<IReport>(
       default: {},
     },
 
-    group: {
-      type: Schema.Types.ObjectId,
-      ref: "Group",
-      required: true,
-      index: true,
-    },
-
     status: {
       type: String,
       required: true,
@@ -123,9 +113,6 @@ ReportSchema.index({ "createdBy.userId": 1 });
 
 // List view: sort by newest first within a status bucket
 ReportSchema.index({ status: 1, createdAt: -1 });
-
-// Group-scoped list view: all reports in a group, sorted by newest first
-ReportSchema.index({ group: 1, status: 1, createdAt: -1 });
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 

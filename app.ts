@@ -23,10 +23,9 @@ const app: Application = express();
 
 // CORS — must be registered before helmet so preflight (OPTIONS) responses
 // are sent without restrictive security headers blocking them.
-const allowedOrigin = process.env.CLIENT_URL ?? "http://localhost:3000";
 app.use(
   cors({
-    origin: allowedOrigin,
+    origin: true,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],

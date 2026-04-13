@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { Types } from "mongoose";
 import { Report } from "../models/Report";
-import { Group } from "../models/Group";
 import { User } from "../models/User";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, ForbiddenError, BadRequestError } from "../errors/AppError";
@@ -52,7 +51,7 @@ export const statsReportHandler = async (req: Request, res: Response): Promise<v
 
   const userId = await User.findOne({ username: actor.username }).select("_id").lean();
 
-  const [globalAgg, byGroupAgg, mineAgg, recentAgg] = await Promise.all([
+  const [globalAgg, mineAgg, recentAgg] = await Promise.all([
     // Total + breakdown by status (global or scoped to user)
     Report.aggregate([
       ...(isManagerOrAbove ? [] : [{ $match: { "createdBy.username": actor.username } }]),
@@ -63,35 +62,6 @@ export const statsReportHandler = async (req: Request, res: Response): Promise<v
         },
       },
     ]),
-
-    // Count per group (managers+ only — users see their own below)
-    isManagerOrAbove
-      ? Report.aggregate([
-          {
-            $group: {
-              _id: "$group",
-              count: { $sum: 1 },
-            },
-          },
-          {
-            $lookup: {
-              from: "groups",
-              localField: "_id",
-              foreignField: "_id",
-              as: "groupDoc",
-            },
-          },
-          {
-            $project: {
-              _id: 0,
-              group: { $arrayElemAt: ["$groupDoc.name", 0] },
-              groupId: "$_id",
-              count: 1,
-            },
-          },
-          { $sort: { count: -1 } },
-        ])
-      : Promise.resolve([]),
 
     // Current user's own counts
     Report.aggregate([
@@ -130,7 +100,6 @@ export const statsReportHandler = async (req: Request, res: Response): Promise<v
   res.status(200).json({
     total:   byStatus.draft + byStatus.published,
     byStatus,
-    byGroup: byGroupAgg,
     mine: {
       total:     mineByStatus.draft + mineByStatus.published,
       draft:     mineByStatus.draft,
@@ -153,15 +122,8 @@ export const statsReportHandler = async (req: Request, res: Response): Promise<v
  * Response 400: validation error or user not found
  */
 export const createReportHandler = async (req: Request, res: Response): Promise<void> => {
-  const { title, description, content, group, status } = req.body as CreateReportInput;
+  const { title, description, content, status } = req.body as CreateReportInput;
   const actor = req.user as AuthenticatedUser;
-
-  // Validate that the target group exists
-  const groupId = new Types.ObjectId(group);
-  const groupExists = await Group.exists({ _id: groupId });
-  if (!groupExists) {
-    throw new BadRequestError(`Group "${group}" does not exist`, "ReportController");
-  }
 
   const userId = await resolveUserId(actor.username);
 
@@ -169,7 +131,6 @@ export const createReportHandler = async (req: Request, res: Response): Promise<
     title,
     description,
     content,
-    group:     groupId,
     status,
     createdBy: { username: actor.username, userId },
     updatedBy: { username: actor.username, userId },
@@ -192,10 +153,9 @@ export const createReportHandler = async (req: Request, res: Response): Promise<
  * Response 200: { data: IReport[], total, page, limit }
  */
 export const listReportsHandler = async (req: Request, res: Response): Promise<void> => {
-  const { group, status, search, author, createdAfter, createdBefore, page, limit } = req.query as unknown as ListReportsQuery;
+  const { status, search, author, createdAfter, createdBefore, page, limit } = req.query as unknown as ListReportsQuery;
 
   const filter: Record<string, unknown> = {};
-  if (group)  filter["group"]  = new Types.ObjectId(group);
   if (status) filter["status"] = status;
   if (search) filter["title"]  = { $regex: search, $options: "i" };
   if (author) filter["createdBy.username"] = { $regex: author, $options: "i" };
@@ -213,7 +173,6 @@ export const listReportsHandler = async (req: Request, res: Response): Promise<v
   const [data, total] = await Promise.all([
     Report.find(filter)
       .select("-content")
-      .populate("group", "name")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -238,7 +197,7 @@ export const listReportsHandler = async (req: Request, res: Response): Promise<v
 export const getReportHandler = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
 
-  const report = await Report.findById(id).populate("group", "name").lean();
+  const report = await Report.findById(id).lean();
 
   if (!report) {
     throw new NotFoundError(`Report ${id} not found`, "ReportController");
@@ -278,26 +237,16 @@ export const updateReportHandler = async (req: Request, res: Response): Promise<
     throw new ForbiddenError("You do not have permission to update this report", "ReportController");
   }
 
-  // Validate that the target group exists when group is being changed
-  if (updates.group) {
-    const groupId = new Types.ObjectId(updates.group);
-    const groupExists = await Group.exists({ _id: groupId });
-    if (!groupExists) {
-      throw new BadRequestError(`Group "${updates.group}" does not exist`, "ReportController");
-    }
-  }
-
   const userId = await resolveUserId(actor.username);
 
   const updated = await Report.findByIdAndUpdate(
     id,
     {
       ...updates,
-      ...(updates.group ? { group: new Types.ObjectId(updates.group) } : {}),
       updatedBy: { username: actor.username, userId },
     },
     { new: true, runValidators: true }
-  ).populate("group", "name");
+  );
 
   logger.info("Report updated", "ReportController", {
     reportId: id,

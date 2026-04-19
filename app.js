@@ -15,6 +15,7 @@ const errorHandler_1 = require("./middleware/errorHandler");
 const authRoute_1 = __importDefault(require("./routes/authRoute"));
 const reportRoute_1 = __importDefault(require("./routes/reportRoute"));
 const userRoute_1 = __importDefault(require("./routes/userRoute"));
+const logRoute_1 = __importDefault(require("./routes/logRoute"));
 // Ensure all Mongoose models are registered before any route handler runs.
 // Without explicit imports here, a model referenced only via `populate()`
 // may not yet be registered if its file hasn't been loaded.
@@ -73,6 +74,7 @@ app.get("/", (req, res) => {
 app.use("/api/v1/auth", authRoute_1.default);
 app.use("/api/v1/reports", reportRoute_1.default);
 app.use("/api/v1/users", userRoute_1.default);
+app.use("/api/v1/logs", logRoute_1.default);
 // 404 — must be after all routes
 app.use(errorHandler_1.notFoundHandler);
 // Global error handler — must be last

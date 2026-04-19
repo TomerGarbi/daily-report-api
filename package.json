@@ -12,6 +12,7 @@
     "start": "node index.js",
     "typecheck": "tsc --noEmit",
     "seed": "ts-node scripts/seed.ts",
+    "seed:report-history": "ts-node scripts/backfillReportHistory.ts",
     "test": "node -e \"console.log('No tests yet')\""
   },
   "dependencies": {

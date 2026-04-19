@@ -2,17 +2,38 @@ import { Request, Response } from "express";
 /**
  * Returns aggregate statistics about reports.
  *
- * Admins/managers see global stats.
- * Regular users see only their own stats.
+ * - Admins / managers see **global** stats (all reports in the system).
+ * - Regular users see only **their own** reports.
  *
  * Response 200:
+ * ```json
  * {
- *   total,
- *   byStatus: { draft, published },
- *   byGroup:  [{ group, count }],
- *   mine:     { total, draft, published },
- *   recent:   { last7Days, last30Days }
+ *   "total": 42,
+ *   "byStatus": { "draft": 5, "published": 37 },
+ *   "mine": {
+ *     "total": 12,
+ *     "draft": 2,
+ *     "published": 10
+ *   },
+ *   "recent": {
+ *     "last7Days": 4,
+ *     "last30Days": 18
+ *   },
+ *   "dailyCounts": [
+ *     { "date": "2026-03-15", "count": 2 },
+ *     { "date": "2026-03-16", "count": 0 },
+ *     ...
+ *   ],
+ *   "topAuthors": [
+ *     { "username": "admin.dev", "count": 15 },
+ *     { "username": "user.dev",  "count": 10 }
+ *   ]
  * }
+ * ```
+ *
+ * Notes:
+ * - `dailyCounts` covers the last 30 days (inclusive of today), with zero-filled gaps.
+ * - `topAuthors` is only present for managers / admins (top 10 by report count).
  */
 export declare const statsReportHandler: (req: Request, res: Response) => Promise<void>;
 /**

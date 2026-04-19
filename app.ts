@@ -3,13 +3,13 @@ import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
-import { logger } from "./services/loggerService";
 import { isDevelopment } from "./config/appConfig";
 import { sanitizeRequest } from "./middleware/sanitize";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 import authRoute from "./routes/authRoute";
 import reportRoute from "./routes/reportRoute";
 import userRoute from "./routes/userRoute";
+import logRoute from "./routes/logRoute";
 
 // Ensure all Mongoose models are registered before any route handler runs.
 // Without explicit imports here, a model referenced only via `populate()`
@@ -61,14 +61,15 @@ app.use((req, res, next) => {
   run();
 });
 
-// HTTP request logging with Morgan
+// HTTP request logging with Morgan (skip health checks)
 if (isDevelopment()) {
-  app.use(morgan("dev"));
+  app.use(morgan("dev", {
+    skip: (req) => req.url === "/health",
+  }));
 }
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  logger.info("Health check requested", "HealthCheck");
   res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
@@ -81,6 +82,7 @@ app.get("/", (req, res) => {
 app.use("/api/v1/auth",    authRoute);
 app.use("/api/v1/reports", reportRoute);
 app.use("/api/v1/users",   userRoute);
+app.use("/api/v1/logs",    logRoute);
 
 // 404 — must be after all routes
 app.use(notFoundHandler);

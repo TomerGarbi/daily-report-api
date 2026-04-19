@@ -31,6 +31,13 @@ const SEED_USERS = [
     { username: "manager.dev", role: "manager", groupNames: ["Managers", "Finance"] },
     { username: "user.dev", role: "user", groupNames: ["Staff"] },
     { username: "guest.dev", role: "guest", groupNames: [] },
+    { username: "sarah.admin", role: "admin", groupNames: ["IT-Admins"] },
+    { username: "david.manager", role: "manager", groupNames: ["Managers"] },
+    { username: "rachel.finance", role: "manager", groupNames: ["Finance", "Managers"] },
+    { username: "alex.dev", role: "user", groupNames: ["Staff"] },
+    { username: "maya.dev", role: "user", groupNames: ["Staff"] },
+    { username: "tom.ops", role: "user", groupNames: ["Staff", "IT-Admins"] },
+    { username: "lisa.guest", role: "guest", groupNames: [] },
 ];
 // ─── Report seed data ─────────────────────────────────────────────────────────
 /**
@@ -430,6 +437,139 @@ const SEED_REPORTS = [
         groupName: "Staff",
         authorUsername: "user.dev",
         createdAt: new Date("2026-02-19T17:00:00Z"),
+    },
+    // ── Reports by new users ───────────────────────────────────────────────
+    // sarah.admin — IT-Admins
+    {
+        title: "Firewall Rule Audit — March 2026",
+        description: "Quarterly review of firewall rules to remove stale entries and ensure compliance.",
+        content: {
+            totalRules: 214,
+            staleRemoved: 18,
+            flaggedForReview: 7,
+            complianceStatus: "pass",
+        },
+        status: "published",
+        groupName: "IT-Admins",
+        authorUsername: "sarah.admin",
+        createdAt: new Date("2026-03-05T10:00:00Z"),
+    },
+    {
+        title: "SSL Certificate Inventory — March 2026",
+        description: "Full inventory of active SSL/TLS certificates with expiry dates and renewal status.",
+        content: {
+            totalCertificates: 34,
+            expiringSoon: 5,
+            expired: 0,
+            autoRenewalEnabled: 29,
+        },
+        status: "draft",
+        groupName: "IT-Admins",
+        authorUsername: "sarah.admin",
+        createdAt: new Date("2026-03-12T14:00:00Z"),
+    },
+    // david.manager — Managers
+    {
+        title: "Cross-Team Dependency Map — Q1 2026",
+        description: "Visual summary of inter-team dependencies and bottleneck areas for Q1.",
+        content: {
+            dependencies: [
+                { from: "Engineering", to: "QA", type: "blocking", status: "resolved" },
+                { from: "Marketing", to: "Engineering", type: "feature-request", status: "in-progress" },
+                { from: "Support", to: "Engineering", type: "bug-fix", status: "open" },
+            ],
+            criticalPath: "Marketing → Engineering → QA",
+        },
+        status: "published",
+        groupName: "Managers",
+        authorUsername: "david.manager",
+        createdAt: new Date("2026-03-08T09:30:00Z"),
+    },
+    // rachel.finance — Finance
+    {
+        title: "Vendor Contract Renewals — Q2 2026",
+        description: "Upcoming vendor contract renewals with cost comparison and negotiation notes.",
+        content: {
+            contracts: [
+                { vendor: "CloudHost Inc.", renewal: "2026-04-15", currentAnnual: 42000, negotiatedAnnual: 39500 },
+                { vendor: "SecureID Corp.", renewal: "2026-05-01", currentAnnual: 18000, negotiatedAnnual: 17200 },
+                { vendor: "DataPipe Ltd.", renewal: "2026-06-10", currentAnnual: 27000, negotiatedAnnual: 25000 },
+            ],
+            totalSavings: 5300,
+        },
+        status: "published",
+        groupName: "Finance",
+        authorUsername: "rachel.finance",
+        createdAt: new Date("2026-03-10T11:00:00Z"),
+    },
+    {
+        title: "Travel & Expense Policy Update — 2026",
+        description: "Proposed changes to the corporate travel and expense reimbursement policy.",
+        content: {
+            changes: [
+                "Increase domestic per-diem from $75 to $90",
+                "Require pre-approval for flights over $500",
+                "Add ride-share receipts as valid expense category",
+            ],
+            effectiveDate: "2026-04-01",
+            approvalStatus: "pending-review",
+        },
+        status: "draft",
+        groupName: "Finance",
+        authorUsername: "rachel.finance",
+        createdAt: new Date("2026-03-18T15:30:00Z"),
+    },
+    // alex.dev — Staff
+    {
+        title: "API Performance Benchmarks — Sprint 48",
+        description: "Load testing results for the report retrieval and creation endpoints.",
+        content: {
+            endpoints: [
+                { path: "GET /api/reports", p50Ms: 45, p95Ms: 120, p99Ms: 310, rps: 500 },
+                { path: "POST /api/reports", p50Ms: 82, p95Ms: 210, p99Ms: 480, rps: 200 },
+            ],
+            environment: "staging",
+            notes: "P99 for POST exceeds 400ms target — investigate DB write contention.",
+        },
+        status: "published",
+        groupName: "Staff",
+        authorUsername: "alex.dev",
+        createdAt: new Date("2026-03-03T16:00:00Z"),
+    },
+    // maya.dev — Staff
+    {
+        title: "Frontend Accessibility Audit — March 2026",
+        description: "WCAG 2.1 AA compliance audit results for the main dashboard views.",
+        content: {
+            pagesAudited: 12,
+            issuesFound: 23,
+            critical: 3,
+            major: 8,
+            minor: 12,
+            topIssues: ["Missing alt text on chart images", "Low contrast on secondary buttons", "Keyboard trap in date picker"],
+        },
+        status: "published",
+        groupName: "Staff",
+        authorUsername: "maya.dev",
+        createdAt: new Date("2026-03-14T11:30:00Z"),
+    },
+    // tom.ops — IT-Admins (cross-group user)
+    {
+        title: "Kubernetes Cluster Health — March 2026",
+        description: "Monthly health check of production k8s cluster nodes, pods, and resource utilisation.",
+        content: {
+            nodes: 6,
+            healthyNodes: 6,
+            totalPods: 84,
+            restartingPods: 2,
+            cpuUtilisation: "62%",
+            memoryUtilisation: "71%",
+            alerts: ["Pod daily-report-worker restarted 3x — OOMKilled"],
+        },
+        status: "published",
+        groupName: "IT-Admins",
+        authorUsername: "tom.ops",
+        createdAt: new Date("2026-03-07T08:45:00Z"),
     },
 ];
 // ─── Helpers ──────────────────────────────────────────────────────────────────

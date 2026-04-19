@@ -51,6 +51,12 @@ export declare const POLICIES: {
         groups: string[];
         mode: "any";
     };
+    /** Viewing logs is restricted to admins or the IT-Admins AD group. */
+    viewLogs: {
+        roles: "admin"[];
+        groups: string[];
+        mode: "any";
+    };
     /** Viewing the user list: managers, admins, or HR group. */
     viewUsers: {
         roles: ("manager" | "admin")[];

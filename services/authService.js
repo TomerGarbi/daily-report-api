@@ -39,6 +39,48 @@ const DEV_USERS = [
         role: "guest",
         groups: [],
     },
+    {
+        username: "sarah.admin",
+        password: "sarah123",
+        role: "admin",
+        groups: ["IT-Admins"],
+    },
+    {
+        username: "david.manager",
+        password: "david123",
+        role: "manager",
+        groups: ["Managers"],
+    },
+    {
+        username: "rachel.finance",
+        password: "rachel123",
+        role: "manager",
+        groups: ["Finance", "Managers"],
+    },
+    {
+        username: "alex.dev",
+        password: "alex123",
+        role: "user",
+        groups: ["Staff"],
+    },
+    {
+        username: "maya.dev",
+        password: "maya123",
+        role: "user",
+        groups: ["Staff"],
+    },
+    {
+        username: "tom.ops",
+        password: "tom123",
+        role: "user",
+        groups: ["Staff", "IT-Admins"],
+    },
+    {
+        username: "lisa.guest",
+        password: "lisa123",
+        role: "guest",
+        groups: [],
+    },
 ];
 // ─── Role resolver for AD (production) ───────────────────────────────────────
 /**

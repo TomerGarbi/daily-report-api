@@ -29,76 +29,135 @@ async function resolveUserId(username: string): Promise<Types.ObjectId> {
 /**
  * Returns aggregate statistics about reports.
  *
- * Admins/managers see global stats.
- * Regular users see only their own stats.
+ * - Admins / managers see **global** stats (all reports in the system).
+ * - Regular users see only **their own** reports.
  *
  * Response 200:
+ * ```json
  * {
- *   total,
- *   byStatus: { draft, published },
- *   byGroup:  [{ group, count }],
- *   mine:     { total, draft, published },
- *   recent:   { last7Days, last30Days }
+ *   "total": 42,
+ *   "byStatus": { "draft": 5, "published": 37 },
+ *   "mine": {
+ *     "total": 12,
+ *     "draft": 2,
+ *     "published": 10
+ *   },
+ *   "recent": {
+ *     "last7Days": 4,
+ *     "last30Days": 18
+ *   },
+ *   "dailyCounts": [
+ *     { "date": "2026-03-15", "count": 2 },
+ *     { "date": "2026-03-16", "count": 0 },
+ *     ...
+ *   ],
+ *   "topAuthors": [
+ *     { "username": "admin.dev", "count": 15 },
+ *     { "username": "user.dev",  "count": 10 }
+ *   ]
  * }
+ * ```
+ *
+ * Notes:
+ * - `dailyCounts` covers the last 30 days (inclusive of today), with zero-filled gaps.
+ * - `topAuthors` is only present for managers / admins (top 10 by report count).
  */
 export const statsReportHandler = async (req: Request, res: Response): Promise<void> => {
   const actor = req.user as AuthenticatedUser;
   const isManagerOrAbove = actor.role === "manager" || actor.role === "admin";
 
-  const now = new Date();
-  const last7  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
+  const now   = new Date();
+  const last7  = new Date(now.getTime() -  7 * 24 * 60 * 60 * 1000);
   const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const userId = await User.findOne({ username: actor.username }).select("_id").lean();
+  // Scope filter: managers+ see everything, others see only their own reports.
+  const scopeMatch = isManagerOrAbove
+    ? {}
+    : { "createdBy.username": actor.username };
 
-  const [globalAgg, mineAgg, recentAgg] = await Promise.all([
-    // Total + breakdown by status (global or scoped to user)
+  const [
+    statusAgg,
+    mineAgg,
+    recentAgg,
+    dailyAgg,
+    topAuthorsAgg,
+  ] = await Promise.all([
+    // 1. Total + breakdown by status (scoped)
     Report.aggregate([
-      ...(isManagerOrAbove ? [] : [{ $match: { "createdBy.username": actor.username } }]),
-      {
-        $group: {
-          _id: "$status",
-          count: { $sum: 1 },
-        },
-      },
+      { $match: scopeMatch },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]),
 
-    // Current user's own counts
+    // 2. Current user's own counts (always scoped to actor)
     Report.aggregate([
       { $match: { "createdBy.username": actor.username } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+
+    // 3. Reports created in the last 7 / 30 days (scoped)
+    Report.aggregate([
+      { $match: { ...scopeMatch, createdAt: { $gte: last30 } } },
       {
         $group: {
-          _id: "$status",
+          _id:  null,
+          last7Days:  { $sum: { $cond: [{ $gte: ["$createdAt", last7] }, 1, 0] } },
+          last30Days: { $sum: 1 },
+        },
+      },
+    ]),
+
+    // 4. Daily counts for the last 30 days (scoped) — for charts
+    Report.aggregate([
+      { $match: { ...scopeMatch, createdAt: { $gte: last30 } } },
+      {
+        $group: {
+          _id:   { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
           count: { $sum: 1 },
         },
       },
+      { $sort: { _id: 1 } },
     ]),
 
-    // Reports created in the last 7 and 30 days
-    Report.aggregate([
-      ...(isManagerOrAbove ? [] : [{ $match: { "createdBy.username": actor.username } }]),
-      {
-        $group: {
-          _id: null,
-          last7Days:  { $sum: { $cond: [{ $gte: ["$createdAt", last7]  }, 1, 0] } },
-          last30Days: { $sum: { $cond: [{ $gte: ["$createdAt", last30] }, 1, 0] } },
-        },
-      },
-    ]),
+    // 5. Top authors (managers+ only — top 10)
+    isManagerOrAbove
+      ? Report.aggregate([
+          {
+            $group: {
+              _id:   "$createdBy.username",
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+          { $limit: 10 },
+          { $project: { _id: 0, username: "$_id", count: 1 } },
+        ])
+      : Promise.resolve([]),
   ]);
 
-  // Shape the status aggregation into { draft: n, published: n }
+  // ── Shape helpers ──────────────────────────────────────────────────────────
+
   const toStatusMap = (agg: { _id: string; count: number }[]) =>
     agg.reduce<{ draft: number; published: number }>(
       (acc, row) => { acc[row._id as "draft" | "published"] = row.count; return acc; },
-      { draft: 0, published: 0 }
+      { draft: 0, published: 0 },
     );
 
-  const byStatus  = toStatusMap(globalAgg);
+  // Zero-fill daily counts so the frontend always has 30 entries.
+  const dailyMap = new Map<string, number>(
+    dailyAgg.map((d: { _id: string; count: number }) => [d._id, d.count]),
+  );
+  const dailyCounts: { date: string; count: number }[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    const key = d.toISOString().slice(0, 10);
+    dailyCounts.push({ date: key, count: dailyMap.get(key) ?? 0 });
+  }
+
+  const byStatus     = toStatusMap(statusAgg);
   const mineByStatus = toStatusMap(mineAgg);
 
-  res.status(200).json({
-    total:   byStatus.draft + byStatus.published,
+  const body: Record<string, unknown> = {
+    total: byStatus.draft + byStatus.published,
     byStatus,
     mine: {
       total:     mineByStatus.draft + mineByStatus.published,
@@ -109,7 +168,14 @@ export const statsReportHandler = async (req: Request, res: Response): Promise<v
       last7Days:  recentAgg[0]?.last7Days  ?? 0,
       last30Days: recentAgg[0]?.last30Days ?? 0,
     },
-  });
+    dailyCounts,
+  };
+
+  if (isManagerOrAbove) {
+    body["topAuthors"] = topAuthorsAgg;
+  }
+
+  res.status(200).json(body);
 };
 
 // ─── POST /reports ────────────────────────────────────────────────────────────

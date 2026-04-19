@@ -56,6 +56,13 @@ exports.POLICIES = {
         groups: ["Reports-Admin"],
         mode: "any",
     },
+    // ── Log policies ────────────────────────────────────────────────────────────
+    /** Viewing logs is restricted to admins or the IT-Admins AD group. */
+    viewLogs: {
+        roles: ["admin"],
+        groups: ["IT-Admins"],
+        mode: "any",
+    },
     // ── User management policies ────────────────────────────────────────────────
     /** Viewing the user list: managers, admins, or HR group. */
     viewUsers: {

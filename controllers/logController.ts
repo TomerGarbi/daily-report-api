@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { Log } from "../models/Log";
+import { NotFoundError } from "../errors/AppError";
 import type { ListLogsQuery } from "../schemas/logSchemas";
 
 // ─── GET /logs ────────────────────────────────────────────────────────────────
@@ -116,8 +117,7 @@ export const getLogHandler = async (req: Request, res: Response): Promise<void> 
   const log = await Log.findById(id).lean();
 
   if (!log) {
-    res.status(404).json({ message: `Log ${id} not found` });
-    return;
+    throw new NotFoundError(`Log ${id} not found`, "LogController");
   }
 
   res.status(200).json(log);

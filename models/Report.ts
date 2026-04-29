@@ -79,7 +79,7 @@ const ReportSchema = new Schema<IReport>(
       type: String,
       required: true,
       enum: ["draft", "published"] satisfies ReportStatus[],
-      default: "draft",
+      default: "published",
       index: true,
     },
 

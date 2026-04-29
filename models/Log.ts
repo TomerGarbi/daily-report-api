@@ -51,8 +51,14 @@ const LogSchema: Schema = new Schema(
 // Index for efficient querying by timestamp and level
 LogSchema.index({ timestamp: -1, level: 1 });
 
-// TTL index - automatically delete logs older than 30 days (optional)
-// Uncomment the line below if you want automatic log cleanup
-// LogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 2592000 });
+// TTL index — Mongo will evict log documents older than LOG_RETENTION_DAYS.
+// Note: changing the retention duration requires dropping and recreating the
+// index in Mongo (TTL `expireAfterSeconds` cannot be modified in place via
+// schema changes alone).
+import { getLogRetentionDays } from "../config/appConfig";
+LogSchema.index(
+  { timestamp: 1 },
+  { expireAfterSeconds: getLogRetentionDays() * 24 * 60 * 60 }
+);
 
 export const Log = mongoose.model<ILog>("Log", LogSchema);

@@ -74,6 +74,7 @@ export const errorHandler = (
       method: req.method,
       path: req.originalUrl,
       username,
+      requestId: req.id,
     });
   } else {
     logger.error(appError.message, appError.context ?? "ErrorHandler", {
@@ -81,6 +82,7 @@ export const errorHandler = (
       method: req.method,
       path: req.originalUrl,
       username,
+      requestId: req.id,
       stack: err instanceof Error ? err.stack : undefined,
     });
   }
@@ -90,8 +92,7 @@ export const errorHandler = (
     status: appError.statusCode,
     message: appError.statusCode < 500 || isDevelopment()
       ? appError.message
-      : "Internal server error",
-  };
+      : "Internal server error",    requestId: req.id,  };
 
   // Attach stack trace in development for faster debugging
   if (isDevelopment() && err instanceof Error) {

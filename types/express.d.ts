@@ -8,5 +8,11 @@ declare module "express-serve-static-core" {
      * Undefined when the request has not been authenticated yet.
      */
     user?: AuthenticatedUser;
+
+    /**
+     * Per-request correlation id. Populated by the requestId middleware,
+     * reusing an inbound `X-Request-Id` header when valid or generating a UUID.
+     */
+    id?: string;
   }
 }

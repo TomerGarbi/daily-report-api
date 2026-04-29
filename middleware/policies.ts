@@ -91,6 +91,26 @@ export const POLICIES = {
     mode: "any",
   },
 
+  // ── Station / unit catalog policies ─────────────────────────────────────────
+
+  /**
+   * Reading the station catalog: any authenticated user that can also see
+   * reports — the report form needs station/unit defaults to render.
+   */
+  viewStations: {
+    roles: ["user", "manager", "admin"],
+  },
+
+  /**
+   * Mutating the station catalog (create / update / delete stations + units)
+   * is restricted to admins or the IT-Admins AD group, mirroring user-management.
+   */
+  manageStations: {
+    roles: ["admin"],
+    groups: ["IT-Admins"],
+    mode: "any",
+  },
+
   // ── System / config policies ────────────────────────────────────────────────
 
   /** Access to system configuration: admins or the IT-Admins AD group. */

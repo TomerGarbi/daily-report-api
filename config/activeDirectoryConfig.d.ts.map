@@ -1,1 +1,0 @@
-{"version":3,"file":"activeDirectoryConfig.d.ts","sourceRoot":"","sources":["activeDirectoryConfig.ts"],"names":[],"mappings":"AAAA,OAAO,OAAO,CAAC;AAEf,MAAM,MAAM,qBAAqB,GAAG;IAClC,GAAG,EAAE,MAAM,CAAC;IACZ,MAAM,EAAE,MAAM,CAAC;IACf,QAAQ,EAAE,MAAM,CAAC;IACjB,QAAQ,EAAE,MAAM,CAAC;CAClB,CAAC;AAEF,eAAO,MAAM,wBAAwB,QAAO,qBA4B3C,CAAC"}

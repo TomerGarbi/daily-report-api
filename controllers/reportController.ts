@@ -5,6 +5,15 @@ import { User } from "../models/User";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, ForbiddenError, BadRequestError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
+import {
+  getEnergyForDate,
+  type YesterdayEnergyTotals,
+} from "../services/externalEnergyService";
+import {
+  getWeatherAt,
+  type HourlyWeatherSnapshot,
+} from "../services/externalWeatherService";
+import type { StationFuel } from "../models/Station";
 import type { CreateReportInput, UpdateReportInput, ListReportsQuery } from "../schemas/reportSchemas";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -329,7 +338,7 @@ export const updateReportHandler = async (req: Request, res: Response): Promise<
  * Delete a report.
  * Restricted to admins and the Reports-Admin group (enforced by route policy).
  *
- * Response 200: { message }
+ * Response 204: no content
  * Response 404: not found
  */
 export const deleteReportHandler = async (req: Request, res: Response): Promise<void> => {
@@ -347,4 +356,200 @@ export const deleteReportHandler = async (req: Request, res: Response): Promise<
   });
 
   res.status(204).end();
+};
+
+// ─── GET /reports/archive/yesterday ──────────────────────────────────────────
+
+/**
+ * In-memory cache for the archive endpoint. The external energy + weather
+ * sources are slow and rate-limited, but yesterday's data doesn't change
+ * within a day — so we cache per-date for ~10 minutes to absorb traffic
+ * from multiple report views.
+ */
+interface ArchiveCacheEntry {
+  expiresAt: number;
+  payload: YesterdayArchivePayload;
+}
+const ARCHIVE_CACHE_TTL_MS = 10 * 60 * 1000;
+const archiveCache = new Map<string, ArchiveCacheEntry>();
+
+const RENEWABLE_FUELS: StationFuel[] = ["solar", "hydro", "wind"];
+const DEFAULT_WEATHER_REGION = "gush-dan";
+
+interface YesterdayArchivePayload {
+  date: string;
+  dayName: string;
+  peakConsumptionHour: string | null;
+  totalsMwhByFuel: Partial<Record<StationFuel, number>>;
+  renewableMwh: number;
+  totalIecMwh: number | null;
+  totalPrivateMwh: number | null;
+  weather: HourlyWeatherSnapshot | null;
+  hasData: boolean;
+}
+
+/**
+ * Returns aggregated information about yesterday's energy production +
+ * peak-hour weather. Used by the report's "archive" section.
+ *
+ * Data is sourced from external integrations (see externalEnergyService /
+ * externalWeatherService). When neither integration is configured or both
+ * fail, the response still returns 200 with `hasData: false` and zeroed
+ * totals — the UI is expected to show a "no data" notice rather than an
+ * error.
+ *
+ * Response 200:
+ * ```json
+ * {
+ *   "date": "2026-04-28T00:00:00.000Z",
+ *   "dayName": "יום שלישי",
+ *   "peakConsumptionHour": "14:30",
+ *   "totalsMwhByFuel": { "gas": 12345, "coal": 678, ... },
+ *   "renewableMwh": 432,
+ *   "totalIecMwh": 9876,
+ *   "totalPrivateMwh": 1234,
+ *   "weather": { "temperatureC": 28.5, "feelsLikeC": 30.1, "humidityPct": 65 },
+ *   "hasData": true
+ * }
+ * ```
+ */
+export const getYesterdayArchiveHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  // Determine target date. Defaults to yesterday; an optional `?date=YYYY-MM-DD`
+  // query lets callers fetch any historical day (used by the archive section's
+  // "extra days" feature).
+  const targetDate = (() => {
+    const raw = typeof req.query.date === "string" ? req.query.date : "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const d = new Date(`${raw}T00:00:00.000Z`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+  })();
+
+  const cacheKey = targetDate.toISOString().slice(0, 10);
+  const cached = archiveCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.status(200).json(cached.payload);
+    return;
+  }
+
+  const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" })
+    .format(targetDate);
+
+  const energy = await getEnergyForDate(targetDate);
+  let weather: HourlyWeatherSnapshot | null = null;
+  if (energy?.peakHour) {
+    weather = await getWeatherAt(targetDate, energy.peakHour, DEFAULT_WEATHER_REGION);
+  }
+
+  const totalsMwhByFuel = energy?.totalsMwhByFuel ?? {};
+  const renewableMwh = RENEWABLE_FUELS.reduce(
+    (sum, k) => sum + (totalsMwhByFuel[k] ?? 0),
+    0,
+  );
+
+  const payload: YesterdayArchivePayload = {
+    date: targetDate.toISOString(),
+    dayName,
+    peakConsumptionHour: energy?.peakHour ?? null,
+    totalsMwhByFuel,
+    renewableMwh,
+    totalIecMwh: energy?.totalIecMwh ?? null,
+    totalPrivateMwh: energy?.totalPrivateMwh ?? null,
+    weather,
+    hasData: Boolean(energy) || Boolean(weather),
+  };
+
+  archiveCache.set(cacheKey, {
+    expiresAt: Date.now() + ARCHIVE_CACHE_TTL_MS,
+    payload,
+  });
+
+  res.status(200).json(payload);
+};
+
+// ─── GET /reports/archive/last-year ──────────────────────────────────────────
+
+/**
+ * Returns aggregated information about the same calendar day one year ago
+ * (relative to yesterday). Used by the report's "archive" section to show
+ * a year-over-year comparison alongside yesterday's data.
+ *
+ * Like `getYesterdayArchiveHandler`, this gracefully degrades to
+ * `hasData: false` with zeroed totals when the upstream integrations are
+ * not configured or fail.
+ */
+interface LastYearArchivePayload {
+  date: string;
+  dayName: string;
+  peakConsumptionHour: string | null;
+  peakConsumptionMw: number | null;
+  totalIecMwh: number | null;
+  totalPrivateMwh: number | null;
+  totalMwh: number;
+  weather: HourlyWeatherSnapshot | null;
+  ytdEnergyGrowthPct: number | null;
+  hasData: boolean;
+}
+
+interface LastYearArchiveCacheEntry {
+  expiresAt: number;
+  payload: LastYearArchivePayload;
+}
+const lastYearArchiveCache = new Map<string, LastYearArchiveCacheEntry>();
+
+export const getLastYearSameDayHandler = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  // Same calendar day one year before yesterday.
+  const sameDay = new Date();
+  sameDay.setUTCDate(sameDay.getUTCDate() - 1);
+  sameDay.setUTCFullYear(sameDay.getUTCFullYear() - 1);
+  sameDay.setUTCHours(0, 0, 0, 0);
+
+  const cacheKey = sameDay.toISOString().slice(0, 10);
+  const cached = lastYearArchiveCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    res.status(200).json(cached.payload);
+    return;
+  }
+
+  const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(sameDay);
+
+  const energy = await getEnergyForDate(sameDay);
+  let weather: HourlyWeatherSnapshot | null = null;
+  if (energy?.peakHour) {
+    weather = await getWeatherAt(sameDay, energy.peakHour, DEFAULT_WEATHER_REGION);
+  }
+
+  const totalIecMwh = energy?.totalIecMwh ?? null;
+  const totalPrivateMwh = energy?.totalPrivateMwh ?? null;
+  const totalMwh = (totalIecMwh ?? 0) + (totalPrivateMwh ?? 0);
+
+  const payload: LastYearArchivePayload = {
+    date: sameDay.toISOString(),
+    dayName,
+    peakConsumptionHour: energy?.peakHour ?? null,
+    peakConsumptionMw:   energy?.peakConsumptionMw ?? null,
+    totalIecMwh,
+    totalPrivateMwh,
+    totalMwh,
+    weather,
+    ytdEnergyGrowthPct: energy?.ytdEnergyGrowthPct ?? null,
+    hasData: Boolean(energy) || Boolean(weather),
+  };
+
+  lastYearArchiveCache.set(cacheKey, {
+    expiresAt: Date.now() + ARCHIVE_CACHE_TTL_MS,
+    payload,
+  });
+
+  res.status(200).json(payload);
 };

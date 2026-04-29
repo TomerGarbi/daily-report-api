@@ -3,6 +3,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
+import { validateObjectId } from "../middleware/validateObjectId";
 import { POLICIES } from "../middleware/policies";
 import { listUsersSchema, updateUserSchema } from "../schemas/userSchemas";
 import {
@@ -24,8 +25,8 @@ router.use(authenticate);
 // DELETE /users/:id  — admins, IT-Admins only
 router.get(   "/stats", authorize(POLICIES.viewUsers),                                       asyncHandler(statsUserHandler));
 router.get(   "/",     authorize(POLICIES.viewUsers),   validate(listUsersSchema, "query"), asyncHandler(listUsersHandler));
-router.get(   "/:id",  authorize(POLICIES.viewUsers),                                       asyncHandler(getUserHandler));
-router.patch( "/:id",  authorize(POLICIES.manageUsers), validate(updateUserSchema),         asyncHandler(updateUserHandler));
-router.delete("/:id",  authorize(POLICIES.manageUsers),                                     asyncHandler(deleteUserHandler));
+router.get(   "/:id",  validateObjectId(), authorize(POLICIES.viewUsers),                                       asyncHandler(getUserHandler));
+router.patch( "/:id",  validateObjectId(), authorize(POLICIES.manageUsers), validate(updateUserSchema),         asyncHandler(updateUserHandler));
+router.delete("/:id",  validateObjectId(), authorize(POLICIES.manageUsers),                                     asyncHandler(deleteUserHandler));
 
 export default router;

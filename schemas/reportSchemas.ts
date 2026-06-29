@@ -88,6 +88,8 @@ const weatherDaySchema = z.object({
   feelsLikeC:   z.number().min(-50).max(60),
   /** Relative humidity, 0–100. */
   humidityPct:  z.number().min(0).max(100),
+  /** Free-text weather description. */
+  description:  z.string().trim().max(200).default(""),
 });
 
 const weatherSourceSchema = z.enum(["db", "manual"]);
@@ -111,11 +113,100 @@ const forecastSchema = z.object({
 
 export { forecastSchema };
 
-const reportContentSchema = z.object({
-  private:  fuelBucketSchema.optional().default({}),
-  iec:      fuelBucketSchema.optional().default({}),
-  forecast: forecastSchema.optional(),
+// ─── Archive (yesterday) ─────────────────────────────────────────────────────
+
+/** Per-fuel totals (MWh). Tolerant of unknown keys for forward compat. */
+const fuelTotalsSchema = z.record(z.string(), z.number().nonnegative()).refine(
+  (obj) =>
+    Object.keys(obj).every((k) => stationFuelKey.safeParse(k).success),
+  { message: "Unknown fuel key in totalsMwhByFuel" },
+);
+
+/** Hour string — accepts HH:MM or empty (prefill may be missing). */
+const optionalHourString = z.union([
+  z.literal(""),
+  hourString,
+]);
+
+const archiveWeatherSchema = z.object({
+  temperatureC: z.number().min(-50).max(60),
+  feelsLikeC:   z.number().min(-50).max(60),
+  humidityPct:  z.number().min(0).max(100),
 });
+
+const archiveBlockSchema = z.object({
+  /** ISO date — informational, not editable. */
+  date:                z.string().min(1),
+  /** Hebrew day name — informational. */
+  dayName:             z.string().max(50),
+  peakConsumptionHour: optionalHourString,
+  totalsMwhByFuel:     fuelTotalsSchema.optional().default({}),
+  renewableMwh:        z.number().nonnegative(),
+  totalIecMwh:         z.number().nonnegative(),
+  totalPrivateMwh:     z.number().nonnegative(),
+  weather:             archiveWeatherSchema,
+});
+
+const lastYearArchiveBlockSchema = z.object({
+  date:                z.string().min(1),
+  dayName:             z.string().max(50),
+  peakConsumptionHour: optionalHourString,
+  peakConsumptionMw:   z.number().nonnegative(),
+  totalIecMwh:         z.number().nonnegative(),
+  totalPrivateMwh:     z.number().nonnegative(),
+  totalMwh:            z.number().nonnegative(),
+  weather:             archiveWeatherSchema,
+  /** Year-to-date growth percentage; can be negative. */
+  ytdEnergyGrowthPct:  z.number(),
+});
+
+export { archiveBlockSchema, lastYearArchiveBlockSchema };
+
+// ─── Fuels (per-tank inventory) ──────────────────────────────────────────────
+
+/** Fuel-type for a tank row. Empty string allowed while the row is being filled in. */
+const fuelRowFuelType = z.union([z.literal(""), stationFuelKey]);
+
+const fuelRowSchema = z.object({
+  /** Stable client-side id (React key / dedup). */
+  id:          z.string().min(1).max(64),
+  /** Fuel-site catalog tag. Empty while not yet picked. */
+  stationTag:  z.string().max(100),
+  /** Denormalized display name from the catalog. */
+  stationName: z.string().max(200),
+  fuelType:    fuelRowFuelType,
+  /** Free-text tank label, typically copied from the FuelSite tank. */
+  tankType:    z.string().max(100),
+  /** Available amount in the tank (excluding bottom reserve). */
+  available:   z.number().nonnegative(),
+  /** Un-pumpable "bottom" / dead-stock reserve. */
+  bottom:      z.number().nonnegative(),
+});
+
+const fuelsBlockSchema = z.array(fuelRowSchema).max(500);
+
+export { fuelRowSchema, fuelsBlockSchema };
+
+// ─── Report content (top-level) ──────────────────────────────────────────────
+
+const reportContentSchema = z.object({
+  /** Stations owned by private producers, grouped by primary fuel. */
+  private:          fuelBucketSchema.optional().default({}),
+  /** Stations owned by Israel Electric Corporation, grouped by primary fuel. */
+  iec:              fuelBucketSchema.optional().default({}),
+  /** Today / tomorrow load + weather forecast. */
+  forecast:         forecastSchema.optional(),
+  /** Yesterday's production + weather archive (editable). */
+  archive:          archiveBlockSchema.optional(),
+  /** Older archived days, ordered from most-recent backwards. */
+  archiveExtraDays: z.array(archiveBlockSchema).max(31).optional(),
+  /** Same-calendar-day-last-year archive (editable). */
+  lastYearArchive:  lastYearArchiveBlockSchema.optional(),
+  /** Per-tank fuel inventory rows. */
+  fuels:            fuelsBlockSchema.optional(),
+});
+
+export { reportContentSchema };
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 

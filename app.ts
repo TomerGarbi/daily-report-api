@@ -15,6 +15,7 @@ import reportRoute from "./routes/reportRoute";
 import userRoute from "./routes/userRoute";
 import logRoute from "./routes/logRoute";
 import stationRoute from "./routes/stationRoute";
+import fuelSiteRoute from "./routes/fuelSiteRoute";
 import weatherRoute from "./routes/weatherRoute";
 
 // Ensure all Mongoose models are registered before any route handler runs.
@@ -25,6 +26,7 @@ import "./models/Group";
 import "./models/Report";
 import "./models/Log";
 import "./models/Station";
+import "./models/FuelSite";
 import "./models/Weather";
 
 const app: Application = express();
@@ -115,8 +117,9 @@ app.use("/api/v1/auth",     authRoute);
 app.use("/api/v1/reports",  reportRoute);
 app.use("/api/v1/users",    userRoute);
 app.use("/api/v1/logs",     logRoute);
-app.use("/api/v1/stations", stationRoute);
-app.use("/api/v1/weather",  weatherRoute);
+app.use("/api/v1/stations",   stationRoute);
+app.use("/api/v1/fuel-sites", fuelSiteRoute);
+app.use("/api/v1/weather",    weatherRoute);
 
 // 404 — must be after all routes
 app.use(notFoundHandler);

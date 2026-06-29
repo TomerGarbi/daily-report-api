@@ -111,6 +111,20 @@ export const POLICIES = {
     mode: "any",
   },
 
+  // ── Fuel-site catalog policies ───────────────────────────────────
+
+  /** Reading the fuel-site catalog: any authenticated user (needed by the report form). */
+  viewFuelSites: {
+    roles: ["user", "manager", "admin"],
+  },
+
+  /** Mutating the fuel-site catalog: admins or IT-Admins. */
+  manageFuelSites: {
+    roles: ["admin"],
+    groups: ["IT-Admins"],
+    mode: "any",
+  },
+
   // ── System / config policies ────────────────────────────────────────────────
 
   /** Access to system configuration: admins or the IT-Admins AD group. */

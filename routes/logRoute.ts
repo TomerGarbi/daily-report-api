@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
+import { trackActivity } from "../middleware/trackActivity";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
 import { validateObjectId } from "../middleware/validateObjectId";
@@ -16,6 +17,7 @@ const router = Router();
 
 // All log routes require authentication
 router.use(authenticate);
+router.use(trackActivity);
 
 router.get("/",      authorize(POLICIES.viewLogs), validate(listLogsSchema, "query"), asyncHandler(listLogsHandler));
 router.get("/stats", authorize(POLICIES.viewLogs),                                    asyncHandler(statsLogsHandler));

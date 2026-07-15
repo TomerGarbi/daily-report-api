@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { AccessPolicy, AuthenticatedUser, Role, ROLE_HIERARCHY } from "../types/auth";
 import { logger } from "../services/loggerService";
+import { audit } from "../services/auditService";
 
 // ─── Role resolution ──────────────────────────────────────────────────────────
 
@@ -120,6 +121,13 @@ export const authorize = (policy: AccessPolicy) => {
         path: req.path,
         method: req.method,
         policy,
+      });
+      audit.recordFailure({
+        req,
+        action: "auth.permission.denied",
+        resource: { type: "route", label: `${req.method} ${req.path}` },
+        reason: "policy check failed",
+        meta: { policy, role: user.role, groups: user.groups },
       });
       res.status(403).json({ status: 403, message: "Access denied." });
       return;

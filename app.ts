@@ -9,11 +9,13 @@ import { sanitizeRequest } from "./middleware/sanitize";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
+import { requestTimeout } from "./middleware/requestTimeout";
 import { defaultRateLimiter } from "./middleware/rateLimiter";
 import authRoute from "./routes/authRoute";
 import reportRoute from "./routes/reportRoute";
 import userRoute from "./routes/userRoute";
 import logRoute from "./routes/logRoute";
+import auditRoute from "./routes/auditRoute";
 import stationRoute from "./routes/stationRoute";
 import fuelSiteRoute from "./routes/fuelSiteRoute";
 import weatherRoute from "./routes/weatherRoute";
@@ -25,6 +27,7 @@ import "./models/User";
 import "./models/Group";
 import "./models/Report";
 import "./models/Log";
+import "./models/AuditEvent";
 import "./models/Station";
 import "./models/FuelSite";
 import "./models/Weather";
@@ -87,6 +90,10 @@ if (isDevelopment()) {
 // Structured per-request logger (production-friendly; logs after response)
 app.use(requestLogger);
 
+// Guards against hung handlers — sends 504 through the normal error flow
+// if a response hasn't been produced within REQUEST_TIMEOUT_MS (default 30s).
+app.use(requestTimeout());
+
 // Health check endpoint — unauthenticated, never rate-limited.
 // Reports DB connection state so container probes can detect dependency outages.
 app.get("/health", (_req, res) => {
@@ -117,6 +124,8 @@ app.use("/api/v1/auth",     authRoute);
 app.use("/api/v1/reports",  reportRoute);
 app.use("/api/v1/users",    userRoute);
 app.use("/api/v1/logs",     logRoute);
+app.use("/api/v1/audit",    auditRoute);
+app.use("/api/v1/audit",    auditRoute);
 app.use("/api/v1/stations",   stationRoute);
 app.use("/api/v1/fuel-sites", fuelSiteRoute);
 app.use("/api/v1/weather",    weatherRoute);

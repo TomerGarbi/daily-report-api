@@ -75,6 +75,17 @@ export const POLICIES = {
     mode: "any",
   },
 
+  /**
+   * Viewing the audit trail — same audience as logs, but split so future
+   * changes (e.g. a wider "compliance" group) don't require touching log
+   * ACLs too.
+   */
+  viewAudit: {
+    roles: ["admin"],
+    groups: ["IT-Admins"],
+    mode: "any",
+  },
+
   // ── User management policies ────────────────────────────────────────────────
 
   /** Viewing the user list: managers, admins, or HR group. */

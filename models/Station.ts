@@ -35,26 +35,38 @@ export const STATION_FUELS: StationFuel[] = [
   "other",
 ];
 
-/**
- * Fuels are free-text on purpose — sites differ enough that a hard-coded
- * enum here would force a code change every time a new fuel type appears.
- * Validation lives in the Zod schema (length / sanitization), not here.
- */
+/** One fuel a unit can run on, plus the peak MW it produces on that fuel. */
+export interface IFuelCapacity {
+  /** Fuel / technology (constrained enum, shared with reports). */
+  type: StationFuel;
+  /** Peak nameplate capacity when running on this fuel, in MW @ 15°C. */
+  capacity: number;
+}
+
 export interface IUnit {
   /** Mongoose-managed sub-doc id; surfaced to clients as `id`. */
   _id: Types.ObjectId;
 
-  /** Short tag shown in tables (e.g. "U-1", "GT-3"). */
-  tag: string;
+  /**
+   * Human-friendly unit number (e.g. `1`, `2`, `3`). User-supplied at
+   * station-creation time. Serves as the unit's display name in reports.
+   * Must be unique within the parent station.
+   */
+  number: number;
 
-  /** Installed nameplate capacity in MW @ 15°C — a default for reports. */
-  installedCapacity: number;
+  /**
+   * Primary fuel this unit runs on and its peak capacity on that fuel.
+   * The station's overall main fuel is derived by aggregating this field
+   * across all units (see `getStationMainFuel` on the frontend).
+   */
+  mainFuel: IFuelCapacity;
 
-  /** Primary fuel (free text, e.g. "Natural Gas", "Diesel"). */
-  mainFuel: string;
-
-  /** Optional secondary / backup fuels. */
-  secondaryFuels: string[];
+  /**
+   * Backup fuels the unit can switch to, each with its own peak capacity.
+   * Fuels here are alternatives to `mainFuel` — capacities are NOT added
+   * to the total; they represent peak MW when the unit runs on that fuel.
+   */
+  secondaryFuels: IFuelCapacity[];
 }
 
 export interface IStation extends Document {
@@ -67,10 +79,10 @@ export interface IStation extends Document {
   /** Ownership type (IEC vs. private independent producer). */
   type: StationType;
 
-  /** Primary generation fuel / technology. */
-  fuel: StationFuel;
-
-  /** Embedded list of physical units owned by this station. */
+  /**
+   * Embedded list of physical units owned by this station. The station's
+   * primary fuel is derived from these units and no longer stored.
+   */
   units: Types.DocumentArray<IUnit>;
 
   // Mongoose-managed timestamps
@@ -80,27 +92,35 @@ export interface IStation extends Document {
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
-const UnitSchema = new Schema<IUnit>(
+const FuelCapacitySchema = new Schema<IFuelCapacity>(
   {
-    tag: {
+    type: {
       type: String,
       required: true,
-      trim: true,
-      maxlength: 50,
+      enum: STATION_FUELS,
     },
-    installedCapacity: {
+    capacity: {
       type: Number,
       required: true,
       min: 0,
     },
-    mainFuel: {
-      type: String,
+  },
+  { _id: false },
+);
+
+const UnitSchema = new Schema<IUnit>(
+  {
+    number: {
+      type: Number,
       required: true,
-      trim: true,
-      maxlength: 100,
+      min: 1,
+    },
+    mainFuel: {
+      type: FuelCapacitySchema,
+      required: true,
     },
     secondaryFuels: {
-      type: [{ type: String, trim: true, maxlength: 100 }],
+      type: [FuelCapacitySchema],
       required: true,
       default: [],
     },
@@ -132,12 +152,6 @@ const StationSchema = new Schema<IStation>(
       enum: STATION_TYPES,
       index: true,
     },
-    fuel: {
-      type: String,
-      required: true,
-      enum: STATION_FUELS,
-      index: true,
-    },
     units: {
       type: [UnitSchema],
       required: true,
@@ -154,11 +168,12 @@ const StationSchema = new Schema<IStation>(
 
 // Fast look-ups
 StationSchema.index({ type: 1, name: 1 });
-StationSchema.index({ fuel: 1, name: 1 });
+// Support filtering stations by any unit's main fuel type.
+StationSchema.index({ "units.mainFuel.type": 1, name: 1 });
 
-// Unit tags must be unique within a single station (not globally).
+// Unit numbers must be unique within a single station (not globally).
 StationSchema.index(
-  { _id: 1, "units.tag": 1 },
+  { _id: 1, "units.number": 1 },
   { unique: true, sparse: true }
 );
 

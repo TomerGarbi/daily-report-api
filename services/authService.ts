@@ -2,91 +2,9 @@ import { authenticateUser, getUserGroups } from "./activeDirectoryService";
 import { generateAccessToken, generateRefreshToken } from "./tokenService";
 import { logger } from "./loggerService";
 import { isDevelopment } from "../config/appConfig";
+import { loadDevUsers } from "../config/devUsers";
 import { AuthenticatedUser, Role } from "../types/auth";
 import { User } from "../models/User";
-
-// ─── Dev user store ───────────────────────────────────────────────────────────
-
-/**
- * Hardcoded users used in development mode only.
- * Never present in a production build.
- *
- * Password is stored in plain text here intentionally — this list is only
- * ever active when NODE_ENV=development.
- */
-const DEV_USERS: Array<{
-  username: string;
-  password: string;
-  role: Role;
-  groups: string[];
-}> = [
-  {
-    username: "admin",
-    password: "admin123",
-    role: "admin",
-    groups: ["IT-Admins", "Managers"],
-  },
-  {
-    username: "manager",
-    password: "manager123",
-    role: "manager",
-    groups: ["Managers", "Finance"],
-  },
-  {
-    username: "user",
-    password: "user123",
-    role: "user",
-    groups: ["Staff"],
-  },
-  {
-    username: "guest",
-    password: "guest123",
-    role: "guest",
-    groups: [],
-  },
-  {
-    username: "sarah.admin",
-    password: "sarah123",
-    role: "admin",
-    groups: ["IT-Admins"],
-  },
-  {
-    username: "david.manager",
-    password: "david123",
-    role: "manager",
-    groups: ["Managers"],
-  },
-  {
-    username: "rachel.finance",
-    password: "rachel123",
-    role: "manager",
-    groups: ["Finance", "Managers"],
-  },
-  {
-    username: "alex.dev",
-    password: "alex123",
-    role: "user",
-    groups: ["Staff"],
-  },
-  {
-    username: "maya.dev",
-    password: "maya123",
-    role: "user",
-    groups: ["Staff"],
-  },
-  {
-    username: "tom.ops",
-    password: "tom123",
-    role: "user",
-    groups: ["Staff", "IT-Admins"],
-  },
-  {
-    username: "lisa.guest",
-    password: "lisa123",
-    role: "guest",
-    groups: [],
-  },
-];
 
 // ─── Role resolver for AD (production) ───────────────────────────────────────
 
@@ -121,20 +39,60 @@ const resolveRole = (groups: string[]): Role => {
  *
  * Role is intentionally NOT overwritten on subsequent logins — it is managed
  * in the database (e.g. promoted to admin/manager by an administrator).
+ *
+ * Also records successful-login metadata (`lastLoginAt`, `lastLoginIp`,
+ * `loginCount`) and clears any accumulated failed-login counter.
  */
-const upsertUserOnLogin = async (username: string, role: Role): Promise<void> => {
+const upsertUserOnLogin = async (
+  username: string,
+  role: Role,
+  ip?: string,
+): Promise<{ disabled: boolean }> => {
   try {
-    await User.findOneAndUpdate(
+    const setOnInsert: Record<string, unknown> = { role, groups: [] };
+    const set: Record<string, unknown> = {
+      lastLoginAt: new Date(),
+      failedLoginCount: 0,
+    };
+    if (ip) set["lastLoginIp"] = ip;
+
+    const doc = await User.findOneAndUpdate(
       { username },
-      { $setOnInsert: { role, groups: [] } }, // only applied on first insert
-      { upsert: true }
-    );
+      {
+        $setOnInsert: setOnInsert,
+        $set: set,
+        $inc: { loginCount: 1 },
+      },
+      { upsert: true, new: true, projection: { disabled: 1 } },
+    ).lean();
+
     logger.debug("User upserted on login", "AuthService", { username, role });
+    return { disabled: Boolean(doc?.disabled) };
   } catch (err) {
     // Non-fatal but important: the issued token may contain a role/groups
     // that aren't reflected in the database. Log at warn level so it's
     // visible in production dashboards.
     logger.warn("Failed to upsert user on login — token may diverge from DB", "AuthService", {
+      username,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { disabled: false };
+  }
+};
+
+/**
+ * Record a failed login attempt so the admin UI can surface accounts under
+ * attack. Never throws — a failing counter must never mask the real reason
+ * the login was rejected.
+ */
+const recordFailedLogin = async (username: string): Promise<void> => {
+  try {
+    await User.updateOne(
+      { username },
+      { $inc: { failedLoginCount: 1 } },
+    );
+  } catch (err) {
+    logger.debug("Failed-login counter update failed", "AuthService", {
       username,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -161,22 +119,37 @@ export interface LoginResult {
  *
  * Throws a plain `Error` with a safe message on failure (no internal details
  * are leaked — callers should return 401 without exposing the reason).
+ *
+ * The optional `ip` is stored on the user document as `lastLoginIp` so
+ * admins can spot logins from unexpected addresses.
  */
 export const login = async (
   username: string,
-  password: string
+  password: string,
+  ip?: string,
 ): Promise<LoginResult> => {
 
   // ── Development mode ────────────────────────────────────────────────────────
   if (isDevelopment()) {
     logger.debug("Login attempt (dev mode)", "AuthService", { username });
 
-    const devUser = DEV_USERS.find(
+    const devUsers = loadDevUsers();
+    if (devUsers.length === 0) {
+      logger.warn(
+        "Dev login attempted but no dev users are configured (missing dev-users.json)",
+        "AuthService",
+        { username },
+      );
+      throw new Error("Invalid credentials");
+    }
+
+    const devUser = devUsers.find(
       (u) => u.username === username && u.password === password
     );
 
     if (!devUser) {
       logger.warn("Dev login failed — invalid credentials", "AuthService", { username });
+      await recordFailedLogin(username);
       throw new Error("Invalid credentials");
     }
 
@@ -186,6 +159,12 @@ export const login = async (
       groups: devUser.groups,
     };
 
+    const { disabled } = await upsertUserOnLogin(username, devUser.role, ip);
+    if (disabled) {
+      logger.warn("Dev login blocked — account disabled", "AuthService", { username });
+      throw new Error("Account disabled");
+    }
+
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
@@ -193,8 +172,6 @@ export const login = async (
       username,
       role: devUser.role,
     });
-
-    await upsertUserOnLogin(username, devUser.role);
 
     return { accessToken, refreshToken, user };
   }
@@ -207,11 +184,13 @@ export const login = async (
     authenticated = await authenticateUser(username, password);
   } catch {
     logger.error("AD authentication threw an error", "AuthService", { username });
+    await recordFailedLogin(username);
     throw new Error("Invalid credentials");
   }
 
   if (!authenticated) {
     logger.warn("AD login failed — invalid credentials", "AuthService", { username });
+    await recordFailedLogin(username);
     throw new Error("Invalid credentials");
   }
 
@@ -228,14 +207,18 @@ export const login = async (
 
   const user: AuthenticatedUser = { username, role, groups };
 
+  // Production: new AD users are provisioned with their resolved role.
+  // Existing users keep whatever role they have in the DB.
+  const { disabled } = await upsertUserOnLogin(username, role, ip);
+  if (disabled) {
+    logger.warn("AD login blocked — account disabled", "AuthService", { username });
+    throw new Error("Account disabled");
+  }
+
   const accessToken = generateAccessToken(user);
   const refreshToken = generateRefreshToken(user);
 
   logger.info("AD login successful", "AuthService", { username, role });
-
-  // Production: new AD users are provisioned with their resolved role.
-  // Existing users keep whatever role they have in the DB.
-  await upsertUserOnLogin(username, role);
 
   return { accessToken, refreshToken, user };
 };

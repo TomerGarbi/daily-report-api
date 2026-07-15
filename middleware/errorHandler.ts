@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
+import { reportException } from "../services/errorReporter";
 import { isDevelopment } from "../config/appConfig";
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
@@ -85,6 +86,22 @@ export const errorHandler = (
       requestId: req.id,
       stack: err instanceof Error ? err.stack : undefined,
     });
+
+    // Non-operational / unexpected — surface to the error reporter so it
+    // can be alerted on / grouped for triage. Operational 4xx errors are
+    // deliberately excluded — they're expected and would just add noise.
+    if (!appError.isOperational || appError.statusCode >= 500) {
+      const reportCtx: Parameters<typeof reportException>[1] = {
+        username,
+        tags: {
+          method: req.method,
+          path: req.route?.path ?? req.originalUrl,
+          statusCode: String(appError.statusCode),
+        },
+      };
+      if (req.id) reportCtx.requestId = req.id;
+      reportException(err, reportCtx);
+    }
   }
 
   // ── Response ───────────────────────────────────────────────────────────────

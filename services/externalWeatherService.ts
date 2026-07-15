@@ -1,4 +1,5 @@
 import { logger } from "./loggerService";
+import { fetchWithResilience } from "./httpClient";
 
 export interface HourlyWeatherSnapshot {
   temperatureC: number;
@@ -16,13 +17,15 @@ export interface HourlyWeatherSnapshot {
  * as an error.
  *
  * Configure with:
- *   - EXTERNAL_WEATHER_API_URL   (required; must accept ?date=YYYY-MM-DD&hour=HH:MM&region=...)
- *   - EXTERNAL_WEATHER_API_KEY   (optional; sent as Bearer token)
+ *   - EXTERNAL_WEATHER_API_URL     (required; must accept ?date=YYYY-MM-DD&hour=HH:MM&region=...)
+ *   - EXTERNAL_WEATHER_API_KEY     (optional; sent as Bearer token)
+ *   - EXTERNAL_WEATHER_TIMEOUT_MS  (optional; default 10000)
  */
 export async function getWeatherAt(
   date: Date,
   hour: string,
   region: string,
+  requestId?: string,
 ): Promise<HourlyWeatherSnapshot | null> {
   const baseUrl = process.env.EXTERNAL_WEATHER_API_URL;
   if (!baseUrl) {
@@ -39,13 +42,21 @@ export async function getWeatherAt(
     headers.Authorization = `Bearer ${process.env.EXTERNAL_WEATHER_API_KEY}`;
   }
 
+  const timeoutMs = Number(process.env.EXTERNAL_WEATHER_TIMEOUT_MS) || 10_000;
+
   try {
-    const res = await fetch(url, { headers });
+    const opts: Parameters<typeof fetchWithResilience>[1] = {
+      headers,
+      timeoutMs,
+      serviceName: "externalWeatherService",
+    };
+    if (requestId) opts.requestId = requestId;
+    const res = await fetchWithResilience(url, opts);
     if (!res.ok) {
       logger.warn(
         `External weather API returned ${res.status}`,
         "externalWeatherService",
-        { status: res.status },
+        { status: res.status, requestId },
       );
       return null;
     }
@@ -55,7 +66,7 @@ export async function getWeatherAt(
     logger.error(
       "External weather API call failed",
       "externalWeatherService",
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: err instanceof Error ? err.message : String(err), requestId },
     );
     return null;
   }

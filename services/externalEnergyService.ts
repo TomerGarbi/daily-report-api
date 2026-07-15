@@ -1,4 +1,5 @@
 import { logger } from "./loggerService";
+import { fetchWithResilience } from "./httpClient";
 import type { StationFuel } from "../models/Station";
 
 /**
@@ -40,8 +41,10 @@ export interface YesterdayEnergyTotals {
  * mapping in this single function when wiring a real provider (Noga,
  * data.gov.il, etc.).
  */
-export async function getYesterdayEnergyTotals(): Promise<YesterdayEnergyTotals | null> {
-  return fetchEnergy(process.env.EXTERNAL_ENERGY_API_URL);
+export async function getYesterdayEnergyTotals(
+  requestId?: string,
+): Promise<YesterdayEnergyTotals | null> {
+  return fetchEnergy(process.env.EXTERNAL_ENERGY_API_URL, requestId);
 }
 
 /**
@@ -49,15 +52,21 @@ export async function getYesterdayEnergyTotals(): Promise<YesterdayEnergyTotals 
  * The upstream URL is called with `?date=YYYY-MM-DD` appended. Used by the
  * "same day last year" archive comparison.
  */
-export async function getEnergyForDate(date: Date): Promise<YesterdayEnergyTotals | null> {
+export async function getEnergyForDate(
+  date: Date,
+  requestId?: string,
+): Promise<YesterdayEnergyTotals | null> {
   const baseUrl = process.env.EXTERNAL_ENERGY_API_URL;
   if (!baseUrl) return null;
   const dateStr = date.toISOString().slice(0, 10);
   const url = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}date=${dateStr}`;
-  return fetchEnergy(url);
+  return fetchEnergy(url, requestId);
 }
 
-async function fetchEnergy(url: string | undefined): Promise<YesterdayEnergyTotals | null> {
+async function fetchEnergy(
+  url: string | undefined,
+  requestId?: string,
+): Promise<YesterdayEnergyTotals | null> {
   if (!url) {
     return null;
   }
@@ -67,13 +76,21 @@ async function fetchEnergy(url: string | undefined): Promise<YesterdayEnergyTota
     headers.Authorization = `Bearer ${process.env.EXTERNAL_ENERGY_API_KEY}`;
   }
 
+  const timeoutMs = Number(process.env.EXTERNAL_ENERGY_TIMEOUT_MS) || 10_000;
+
   try {
-    const res = await fetch(url, { headers });
+    const opts: Parameters<typeof fetchWithResilience>[1] = {
+      headers,
+      timeoutMs,
+      serviceName: "externalEnergyService",
+    };
+    if (requestId) opts.requestId = requestId;
+    const res = await fetchWithResilience(url, opts);
     if (!res.ok) {
       logger.warn(
         `External energy API returned ${res.status}`,
         "externalEnergyService",
-        { status: res.status },
+        { status: res.status, requestId },
       );
       return null;
     }
@@ -83,7 +100,7 @@ async function fetchEnergy(url: string | undefined): Promise<YesterdayEnergyTota
     logger.error(
       "External energy API call failed",
       "externalEnergyService",
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: err instanceof Error ? err.message : String(err), requestId },
     );
     return null;
   }

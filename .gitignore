@@ -6,3 +6,6 @@ build/
 !.env.example
 logs/
 *.log
+
+# Local dev user list — real values kept out of git; example file is checked in.
+dev-users.json

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
+import { trackActivity } from "../middleware/trackActivity";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
 import { validateObjectId } from "../middleware/validateObjectId";
@@ -21,6 +22,7 @@ const router = Router();
 
 // All report routes require authentication
 router.use(authenticate);
+router.use(trackActivity);
 
 router.post(  "/",       authorize(POLICIES.createReport), validate(createReportSchema),         asyncHandler(createReportHandler));
 router.get(   "/",       authorize(POLICIES.viewReports),  validate(listReportsSchema, "query"), asyncHandler(listReportsHandler));

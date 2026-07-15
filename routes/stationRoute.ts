@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
+import { trackActivity } from "../middleware/trackActivity";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
 import { validateObjectId } from "../middleware/validateObjectId";
@@ -27,6 +28,7 @@ const router = Router();
 
 // Every station route requires authentication.
 router.use(authenticate);
+router.use(trackActivity);
 
 // ── Read: any authenticated user that can view reports ──────────────────────
 router.get("/",    authorize(POLICIES.viewStations), validate(listStationsSchema, "query"), asyncHandler(listStationsHandler));

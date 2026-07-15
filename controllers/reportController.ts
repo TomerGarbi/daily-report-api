@@ -5,6 +5,7 @@ import { User } from "../models/User";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, ForbiddenError, BadRequestError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
+import { audit } from "../services/auditService";
 import {
   getEnergyForDate,
   type YesterdayEnergyTotals,
@@ -216,6 +217,13 @@ export const createReportHandler = async (req: Request, res: Response): Promise<
     username: actor.username,
   });
 
+  audit.recordSuccess({
+    req,
+    action: status === "published" ? "report.publish" : "report.create",
+    resource: { type: "report", id: report._id.toString(), label: title },
+    after: { title, status, description },
+  });
+
   res.status(201).json(report);
 };
 
@@ -329,6 +337,27 @@ export const updateReportHandler = async (req: Request, res: Response): Promise<
     fields: Object.keys(updates),
   });
 
+  // Detect a status flip to "published" and emit that as its own action.
+  const publishing =
+    updates.status === "published" && report.status !== "published";
+
+  audit.recordSuccess({
+    req,
+    action: publishing ? "report.publish" : "report.update",
+    resource: { type: "report", id: id as string, label: report.title },
+    before: {
+      title: report.title,
+      status: report.status,
+      description: report.description,
+    },
+    after: {
+      title:       updates.title       ?? report.title,
+      status:      updates.status      ?? report.status,
+      description: updates.description ?? report.description,
+    },
+    meta: { changedFields: Object.keys(updates) },
+  });
+
   res.status(200).json(updated);
 };
 
@@ -353,6 +382,13 @@ export const deleteReportHandler = async (req: Request, res: Response): Promise<
   logger.info("Report deleted", "ReportController", {
     reportId: id,
     username: (req.user as AuthenticatedUser).username,
+  });
+
+  audit.recordSuccess({
+    req,
+    action: "report.delete",
+    resource: { type: "report", id: id as string, label: report.title },
+    before: { title: report.title, status: report.status },
   });
 
   res.status(204).end();
@@ -442,10 +478,10 @@ export const getYesterdayArchiveHandler = async (
   const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" })
     .format(targetDate);
 
-  const energy = await getEnergyForDate(targetDate);
+  const energy = await getEnergyForDate(targetDate, req.id);
   let weather: HourlyWeatherSnapshot | null = null;
   if (energy?.peakHour) {
-    weather = await getWeatherAt(targetDate, energy.peakHour, DEFAULT_WEATHER_REGION);
+    weather = await getWeatherAt(targetDate, energy.peakHour, DEFAULT_WEATHER_REGION, req.id);
   }
 
   const totalsMwhByFuel = energy?.totalsMwhByFuel ?? {};
@@ -505,7 +541,7 @@ interface LastYearArchiveCacheEntry {
 const lastYearArchiveCache = new Map<string, LastYearArchiveCacheEntry>();
 
 export const getLastYearSameDayHandler = async (
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> => {
   // Same calendar day one year before yesterday.
@@ -523,10 +559,10 @@ export const getLastYearSameDayHandler = async (
 
   const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(sameDay);
 
-  const energy = await getEnergyForDate(sameDay);
+  const energy = await getEnergyForDate(sameDay, req.id);
   let weather: HourlyWeatherSnapshot | null = null;
   if (energy?.peakHour) {
-    weather = await getWeatherAt(sameDay, energy.peakHour, DEFAULT_WEATHER_REGION);
+    weather = await getWeatherAt(sameDay, energy.peakHour, DEFAULT_WEATHER_REGION, req.id);
   }
 
   const totalIecMwh = energy?.totalIecMwh ?? null;

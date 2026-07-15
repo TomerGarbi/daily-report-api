@@ -1,0 +1,17 @@
+{
+  "$schema": "./dev-users.schema.json",
+  "$comment": "Dev-only users used when NODE_ENV=development. Loaded from DEV_USERS_FILE env (default: ./dev-users.json in the api root). Never packaged into a production image; the loader refuses to run when NODE_ENV=production.",
+  "users": [
+    { "username": "admin",           "password": "admin123",   "role": "admin",   "groups": ["IT-Admins", "Managers"] },
+    { "username": "manager",         "password": "manager123", "role": "manager", "groups": ["Managers", "Finance"] },
+    { "username": "user",            "password": "user123",    "role": "user",    "groups": ["Staff"] },
+    { "username": "guest",           "password": "guest123",   "role": "guest",   "groups": [] },
+    { "username": "sarah.admin",     "password": "sarah123",   "role": "admin",   "groups": ["IT-Admins"] },
+    { "username": "david.manager",   "password": "david123",   "role": "manager", "groups": ["Managers"] },
+    { "username": "rachel.finance",  "password": "rachel123",  "role": "manager", "groups": ["Finance", "Managers"] },
+    { "username": "alex.dev",        "password": "alex123",    "role": "user",    "groups": ["Staff"] },
+    { "username": "maya.dev",        "password": "maya123",    "role": "user",    "groups": ["Staff"] },
+    { "username": "tom.ops",         "password": "tom123",     "role": "user",    "groups": ["Staff", "IT-Admins"] },
+    { "username": "lisa.guest",      "password": "lisa123",    "role": "guest",   "groups": [] }
+  ]
+}

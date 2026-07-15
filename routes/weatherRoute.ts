@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
+import { trackActivity } from "../middleware/trackActivity";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
 import { POLICIES } from "../middleware/policies";
@@ -10,6 +11,7 @@ import { getWeatherForecastHandler } from "../controllers/weatherController";
 const router = Router();
 
 router.use(authenticate);
+router.use(trackActivity);
 
 // GET /weather/forecast?region=gush-dan
 router.get(

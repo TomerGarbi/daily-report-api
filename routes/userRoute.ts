@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { authenticate } from "../middleware/authenticate";
+import { trackActivity } from "../middleware/trackActivity";
 import { authorize } from "../middleware/authorize";
 import { validate } from "../middleware/validate";
 import { validateObjectId } from "../middleware/validateObjectId";
@@ -18,6 +19,7 @@ const router = Router();
 
 // All user-management routes require authentication
 router.use(authenticate);
+router.use(trackActivity);
 
 // GET  /users        — managers, admins, HR, IT-Admins
 // GET  /users/:id    — same

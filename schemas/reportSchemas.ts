@@ -35,13 +35,22 @@ const stationRowSchema = z.object({
 
   // ── Optional catalog linkage (set when the row was created from the
   // station/unit catalog managed in /settings/stations).
-  // These are purely informational here — they let consumers know that
-  // `installedCapacity`, `mainFuel` and `secondaryFuels` came from the
-  // catalog and shouldn't be edited inline. The report itself never
-  // mutates the catalog; the catalog mutates these defaults via its own
-  // settings page. ──
+  //
+  // Snapshot semantics: `stationName`, `mainFuel`, `secondaryFuels` and
+  // `installedCapacity` are FROZEN COPIES of the catalog values at the
+  // moment the row was created. They are never re-synced from the catalog
+  // afterwards — later catalog edits (renames, fuel/capacity changes,
+  // deletions) do NOT affect existing reports. This keeps historical
+  // reports reproducible even if the source station/unit is modified or
+  // removed. `stationId` / `unitId` are kept for traceability only and
+  // may dangle if the catalog entry is later deleted.
+  //
+  // The report never writes back to the catalog; the catalog's own
+  // settings page is the sole source of edits, which apply only to rows
+  // created after the edit. ──
   stationId:      objectIdString.optional(),
   unitId:         objectIdString.optional(),
+  stationName:    z.string().max(200).optional(),
   mainFuel:       z.string().max(100).optional(),
   secondaryFuels: z.array(z.string().max(100)).max(10).optional(),
 });

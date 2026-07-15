@@ -10,6 +10,7 @@ import { AuthenticatedUser } from "../types/auth";
 import { logger } from "../services/loggerService";
 import { isDevelopment } from "../config/appConfig";
 import { User } from "../models/User";
+import { audit } from "../services/auditService";
 
 const REFRESH_COOKIE = "refreshToken";
 const REFRESH_COOKIE_PATH = "/api/v1/auth";
@@ -29,7 +30,22 @@ const REFRESH_COOKIE_PATH = "/api/v1/auth";
 export const loginHandler = async (req: Request, res: Response): Promise<void> => {
   const { username, password } = req.body as { username: string; password: string };
 
-  const result = await login(username, password);
+  let result;
+  try {
+    result = await login(username, password, req.ip);
+  } catch (err) {
+    // Fill in `req.user` so the audit event has an actor before rethrowing.
+    // The Express type expects the real AuthenticatedUser shape; we only set
+    // `username` (all other fields default undefined for anonymous attempts).
+    (req as unknown as { user: { username: string } }).user = { username };
+    audit.recordFailure({
+      req,
+      action: "auth.login",
+      resource: { type: "user", label: username },
+      reason: err instanceof Error ? err.message : "login failed",
+    });
+    throw err;
+  }
 
   const { refreshExpiresIn } = getJwtConfig();
   const maxAge = ms(refreshExpiresIn); // convert e.g. "7d" → milliseconds
@@ -51,6 +67,16 @@ export const loginHandler = async (req: Request, res: Response): Promise<void> =
       role: result.user.role,
       groups: result.user.groups,
     },
+  });
+
+  // Populate req.user so the audit event has an actor (post-login the middleware
+  // hasn't run yet on this request).
+  (req as unknown as { user: AuthenticatedUser }).user = result.user;
+  audit.recordSuccess({
+    req,
+    action: "auth.login",
+    resource: { type: "user", label: result.user.username },
+    meta: { role: result.user.role, groups: result.user.groups },
   });
 };
 
@@ -146,6 +172,12 @@ export const logoutHandler = async (req: Request, res: Response): Promise<void> 
 
   const username = (req.user as AuthenticatedUser).username;
   logger.info("User logged out", "AuthController", { username });
+
+  audit.recordSuccess({
+    req,
+    action: "auth.logout",
+    resource: { type: "user", label: username },
+  });
 
   res.status(200).json({ message: "Logged out successfully" });
 };

@@ -3,6 +3,7 @@ import { FuelSite } from "../models/FuelSite";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, BadRequestError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
+import { audit } from "../services/auditService";
 import type {
   CreateFuelSiteInput,
   UpdateFuelSiteInput,
@@ -109,6 +110,13 @@ export const createFuelSiteHandler = async (req: Request, res: Response): Promis
     createdBy: actor.username,
   });
 
+  audit.recordSuccess({
+    req,
+    action: "fuelSite.create",
+    resource: { type: "fuelSite", id: String(site._id), label: site.tag },
+    after: { tag: site.tag, name: site.name, fuelTypes: site.fuelTypes },
+  });
+
   res.status(201).json(site);
 };
 
@@ -156,6 +164,13 @@ export const updateFuelSiteHandler = async (req: Request, res: Response): Promis
     updatedBy: actor.username,
   });
 
+  audit.recordSuccess({
+    req,
+    action: "fuelSite.update",
+    resource: { type: "fuelSite", id: id as string, label: site.tag },
+    meta: { changedFields: Object.keys(payload) },
+  });
+
   res.status(200).json(updated);
 };
 
@@ -174,6 +189,13 @@ export const deleteFuelSiteHandler = async (req: Request, res: Response): Promis
     fuelSiteId: id,
     tag: site.tag,
     deletedBy: actor.username,
+  });
+
+  audit.recordSuccess({
+    req,
+    action: "fuelSite.delete",
+    resource: { type: "fuelSite", id: id as string, label: site.tag },
+    before: { tag: site.tag },
   });
 
   res.status(204).end();

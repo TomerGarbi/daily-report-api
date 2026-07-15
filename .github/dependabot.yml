@@ -1,0 +1,80 @@
+# Dependabot configuration for the DailyReport backend (Express 5 / Mongoose / mssql).
+#
+# Weekly cadence keeps noise low; PRs are grouped so related updates arrive
+# as a single reviewable batch. See
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # ── npm (application dependencies) ──────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Jerusalem"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: "scope"
+    groups:
+      # Express + related HTTP middleware — align them so a breaking
+      # middleware change lands with its compatible express version.
+      express:
+        patterns:
+          - "express"
+          - "express-*"
+          - "@types/express*"
+          - "cookie-parser"
+          - "@types/cookie-parser"
+          - "cors"
+          - "@types/cors"
+          - "helmet"
+          - "compression"
+          - "@types/compression"
+      # Auth stack.
+      auth:
+        patterns:
+          - "jsonwebtoken"
+          - "@types/jsonwebtoken"
+          - "bcrypt*"
+          - "@types/bcrypt*"
+      # Data layer.
+      data:
+        patterns:
+          - "mongoose"
+          - "mssql"
+          - "@types/mssql"
+      # Test / lint tooling.
+      tooling:
+        patterns:
+          - "typescript*"
+          - "@typescript-eslint/*"
+          - "eslint*"
+          - "prettier*"
+          - "ts-node*"
+          - "tsx"
+          - "nodemon"
+      # Logging.
+      logging:
+        patterns:
+          - "winston*"
+
+  # ── GitHub Actions workflows ────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Asia/Jerusalem"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"

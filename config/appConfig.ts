@@ -52,3 +52,14 @@ export const getLogRetentionDays = (): number => {
   const parsed = raw ? parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
 };
+
+/**
+ * Number of days to retain `AuditEvent` documents before MongoDB TTL evicts
+ * them. Defaults to 365 — audit trails answer compliance-grade questions and
+ * warrant a longer window than debug logs.
+ */
+export const getAuditRetentionDays = (): number => {
+  const raw = process.env.AUDIT_RETENTION_DAYS;
+  const parsed = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 365;
+};

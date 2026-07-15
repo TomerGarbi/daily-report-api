@@ -3,6 +3,7 @@ import { Station } from "../models/Station";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, BadRequestError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
+import { audit } from "../services/auditService";
 import type {
   CreateStationInput,
   UpdateStationInput,
@@ -14,21 +15,20 @@ import type {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Throws a `BadRequestError` when the unit tags inside a station collide.
+ * Throws a `BadRequestError` when the unit numbers inside a station collide.
  * Done in code (not a unique sub-doc index) so the error message names
- * the offending tag rather than a cryptic Mongo `E11000`.
+ * the offending number rather than a cryptic Mongo `E11000`.
  */
-function assertUniqueUnitTags(units: { tag: string }[]): void {
-  const seen = new Set<string>();
+function assertUniqueUnitNumbers(units: { number: number }[]): void {
+  const seen = new Set<number>();
   for (const u of units) {
-    const key = u.tag.trim().toLowerCase();
-    if (seen.has(key)) {
+    if (seen.has(u.number)) {
       throw new BadRequestError(
-        `Duplicate unit tag "${u.tag}" within station.`,
+        `Duplicate unit number "${u.number}" within station.`,
         "StationController"
       );
     }
-    seen.add(key);
+    seen.add(u.number);
   }
 }
 
@@ -39,7 +39,8 @@ function assertUniqueUnitTags(units: { tag: string }[]): void {
  *
  * Query params (all optional):
  *   type   — filter by ownership type (iec | private)
- *   fuel   — filter by fuel / technology type
+ *   fuel   — keep only stations that have at least one unit whose main fuel
+ *            matches this value (station no longer stores a fuel of its own)
  *   search   — case-insensitive substring match against `name` and `tag`
  *   page     — 1-based (default 1)
  *   limit    — page size (default 50, max 200)
@@ -51,7 +52,7 @@ export const listStationsHandler = async (req: Request, res: Response): Promise<
 
   const filter: Record<string, unknown> = {};
   if (type) filter["type"] = type;
-  if (fuel) filter["fuel"] = fuel;
+  if (fuel) filter["units.mainFuel.type"] = fuel;
   if (search) {
     filter["$or"] = [
       { name: { $regex: search, $options: "i" } },
@@ -92,7 +93,7 @@ export const createStationHandler = async (req: Request, res: Response): Promise
   const input = req.body as CreateStationInput;
 
   if (input.units?.length) {
-    assertUniqueUnitTags(input.units);
+    assertUniqueUnitNumbers(input.units);
   }
 
   // Tag uniqueness is enforced by the unique index, but checking up-front
@@ -111,8 +112,15 @@ export const createStationHandler = async (req: Request, res: Response): Promise
     stationId: String(station._id),
     tag: station.tag,
     type: station.type,
-    fuel: station.fuel,
+    unitCount: station.units.length,
     createdBy: actor.username,
+  });
+
+  audit.recordSuccess({
+    req,
+    action: "station.create",
+    resource: { type: "station", id: String(station._id), label: station.tag },
+    after: { tag: station.tag, name: station.name, type: station.type },
   });
 
   res.status(201).json(station);
@@ -141,14 +149,13 @@ export const updateStationHandler = async (req: Request, res: Response): Promise
   }
 
   if (input.units) {
-    assertUniqueUnitTags(input.units);
+    assertUniqueUnitNumbers(input.units);
   }
 
   const payload: Record<string, unknown> = {};
   if (input.name !== undefined) payload["name"] = input.name;
   if (input.tag  !== undefined) payload["tag"]  = input.tag;
   if (input.type !== undefined) payload["type"] = input.type;
-  if (input.fuel !== undefined) payload["fuel"] = input.fuel;
   if (input.units !== undefined) payload["units"] = input.units;
 
   const updated = await Station.findByIdAndUpdate(
@@ -161,6 +168,13 @@ export const updateStationHandler = async (req: Request, res: Response): Promise
     stationId: id,
     fields: Object.keys(payload),
     updatedBy: actor.username,
+  });
+
+  audit.recordSuccess({
+    req,
+    action: "station.update",
+    resource: { type: "station", id: id as string, label: station.tag },
+    meta: { changedFields: Object.keys(payload) },
   });
 
   res.status(200).json(updated);
@@ -185,6 +199,13 @@ export const deleteStationHandler = async (req: Request, res: Response): Promise
     deletedBy: actor.username,
   });
 
+  audit.recordSuccess({
+    req,
+    action: "station.delete",
+    resource: { type: "station", id: id as string, label: station.tag },
+    before: { tag: station.tag },
+  });
+
   res.status(204).end();
 };
 
@@ -206,11 +227,10 @@ export const addUnitHandler = async (req: Request, res: Response): Promise<void>
     throw new NotFoundError(`Station ${id} not found`, "StationController");
   }
 
-  // Reject duplicate tags within the same station.
-  const lower = input.tag.trim().toLowerCase();
-  if (station.units.some((u) => u.tag.trim().toLowerCase() === lower)) {
+  // Reject duplicate numbers within the same station.
+  if (station.units.some((u) => u.number === input.number)) {
     throw new BadRequestError(
-      `Unit tag "${input.tag}" already exists on station "${station.tag}".`,
+      `Unit number "${input.number}" already exists on station "${station.tag}".`,
       "StationController"
     );
   }
@@ -220,7 +240,7 @@ export const addUnitHandler = async (req: Request, res: Response): Promise<void>
 
   logger.info("Unit added", "StationController", {
     stationId: id,
-    unitTag: input.tag,
+    unitNumber: input.number,
     addedBy: actor.username,
   });
 
@@ -249,20 +269,18 @@ export const updateUnitHandler = async (req: Request, res: Response): Promise<vo
     );
   }
 
-  if (input.tag && input.tag !== unit.tag) {
-    const lower = input.tag.trim().toLowerCase();
-    if (station.units.some((u) => String(u._id) !== unitId && u.tag.trim().toLowerCase() === lower)) {
+  if (input.number !== undefined && input.number !== unit.number) {
+    if (station.units.some((u) => String(u._id) !== unitId && u.number === input.number)) {
       throw new BadRequestError(
-        `Unit tag "${input.tag}" already exists on station "${station.tag}".`,
+        `Unit number "${input.number}" already exists on station "${station.tag}".`,
         "StationController"
       );
     }
   }
 
-  if (input.tag               !== undefined) unit.tag               = input.tag;
-  if (input.installedCapacity !== undefined) unit.installedCapacity = input.installedCapacity;
-  if (input.mainFuel          !== undefined) unit.mainFuel          = input.mainFuel;
-  if (input.secondaryFuels    !== undefined) unit.secondaryFuels    = input.secondaryFuels;
+  if (input.number         !== undefined) unit.number         = input.number;
+  if (input.mainFuel       !== undefined) unit.mainFuel       = input.mainFuel;
+  if (input.secondaryFuels !== undefined) unit.secondaryFuels = input.secondaryFuels;
 
   await station.save();
 

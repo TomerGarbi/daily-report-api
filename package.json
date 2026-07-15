@@ -34,7 +34,7 @@
     "winston-daily-rotate-file": "^5.0.0",
     "winston-mongodb": "^7.0.1",
     "xss": "^1.0.15",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/activedirectory2": "^1.2.6",

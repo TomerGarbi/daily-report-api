@@ -80,6 +80,14 @@ export interface IStation extends Document {
   type: StationType;
 
   /**
+   * Reference to the {@link StationGroup} that decides how this station
+   * is grouped inside report tables. Optional only while the catalog is
+   * being migrated from the legacy fuel-based layout — new stations
+   * should always have a group of the matching `type`.
+   */
+  groupId?: Types.ObjectId | null;
+
+  /**
    * Embedded list of physical units owned by this station. The station's
    * primary fuel is derived from these units and no longer stored.
    */
@@ -152,6 +160,15 @@ const StationSchema = new Schema<IStation>(
       enum: STATION_TYPES,
       index: true,
     },
+    // Nullable during migration. Enforced non-null via a partial index below
+    // (existing docs without a group can be back-filled by the migration).
+    groupId: {
+      type: Schema.Types.ObjectId,
+      ref: "StationGroup",
+      required: false,
+      default: null,
+      index: true,
+    },
     units: {
       type: [UnitSchema],
       required: true,
@@ -170,6 +187,8 @@ const StationSchema = new Schema<IStation>(
 StationSchema.index({ type: 1, name: 1 });
 // Support filtering stations by any unit's main fuel type.
 StationSchema.index({ "units.mainFuel.type": 1, name: 1 });
+// Fast look-up of "stations in group X".
+StationSchema.index({ groupId: 1, name: 1 });
 
 // Unit numbers must be unique within a single station (not globally).
 StationSchema.index(

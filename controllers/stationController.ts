@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { Station } from "../models/Station";
+import { StationGroup } from "../models/StationGroup";
 import { AuthenticatedUser } from "../types/auth";
 import { NotFoundError, BadRequestError } from "../errors/AppError";
 import { logger } from "../services/loggerService";
@@ -32,6 +33,31 @@ function assertUniqueUnitNumbers(units: { number: number }[]): void {
   }
 }
 
+/**
+ * Ensures the requested group exists and its `type` matches the station's
+ * ownership type. Reports are organised as `content.<stationType>.<groupTag>`,
+ * so a private station may not point at an IEC group (or vice-versa).
+ */
+async function assertGroupMatchesType(
+  groupId: string | null | undefined,
+  stationType: string,
+): Promise<void> {
+  if (!groupId) return;
+  const group = await StationGroup.findById(groupId).select("_id type tag").lean();
+  if (!group) {
+    throw new BadRequestError(
+      `Station group ${groupId} not found.`,
+      "StationController",
+    );
+  }
+  if (group.type !== stationType) {
+    throw new BadRequestError(
+      `Station group "${group.tag}" has type "${group.type}" but the station is "${stationType}".`,
+      "StationController",
+    );
+  }
+}
+
 // ─── GET /stations ────────────────────────────────────────────────────────────
 
 /**
@@ -48,11 +74,12 @@ function assertUniqueUnitNumbers(units: { number: number }[]): void {
  * Response 200: { data, total, page, limit, totalPages, hasNextPage }
  */
 export const listStationsHandler = async (req: Request, res: Response): Promise<void> => {
-  const { type, fuel, search, page, limit } = req.query as unknown as ListStationsQuery;
+  const { type, fuel, groupId, search, page, limit } = req.query as unknown as ListStationsQuery;
 
   const filter: Record<string, unknown> = {};
-  if (type) filter["type"] = type;
-  if (fuel) filter["units.mainFuel.type"] = fuel;
+  if (type)    filter["type"] = type;
+  if (fuel)    filter["units.mainFuel.type"] = fuel;
+  if (groupId) filter["groupId"] = groupId;
   if (search) {
     filter["$or"] = [
       { name: { $regex: search, $options: "i" } },
@@ -96,6 +123,8 @@ export const createStationHandler = async (req: Request, res: Response): Promise
     assertUniqueUnitNumbers(input.units);
   }
 
+  await assertGroupMatchesType(input.groupId ?? null, input.type);
+
   // Tag uniqueness is enforced by the unique index, but checking up-front
   // gives a clearer error message than the raw E11000 surface.
   const existing = await Station.findOne({ tag: input.tag }).select("_id").lean();
@@ -106,7 +135,18 @@ export const createStationHandler = async (req: Request, res: Response): Promise
     );
   }
 
-  const station = await Station.create(input);
+  // Only include `groupId` in the create payload if the caller explicitly
+  // sent it, so mongoose doesn't reject `undefined` under
+  // exactOptionalPropertyTypes.
+  const createPayload: Record<string, unknown> = {
+    name:  input.name,
+    tag:   input.tag,
+    type:  input.type,
+    units: input.units,
+  };
+  if (input.groupId !== undefined) createPayload["groupId"] = input.groupId;
+
+  const station = await Station.create(createPayload);
 
   logger.info("Station created", "StationController", {
     stationId: String(station._id),
@@ -152,10 +192,20 @@ export const updateStationHandler = async (req: Request, res: Response): Promise
     assertUniqueUnitNumbers(input.units);
   }
 
+  // Validate the target group (if provided) against the resulting station type.
+  const nextType = input.type ?? station.type;
+  if (input.groupId !== undefined) {
+    await assertGroupMatchesType(input.groupId, nextType);
+  } else if (input.type && input.type !== station.type && station.groupId) {
+    // Type change alone is allowed only if the current group also matches.
+    await assertGroupMatchesType(String(station.groupId), input.type);
+  }
+
   const payload: Record<string, unknown> = {};
   if (input.name !== undefined) payload["name"] = input.name;
   if (input.tag  !== undefined) payload["tag"]  = input.tag;
   if (input.type !== undefined) payload["type"] = input.type;
+  if (input.groupId !== undefined) payload["groupId"] = input.groupId;
   if (input.units !== undefined) payload["units"] = input.units;
 
   const updated = await Station.findByIdAndUpdate(

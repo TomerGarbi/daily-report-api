@@ -35,7 +35,7 @@ const HARMFUL_CONTENT_PATTERN =
  * Note: `&` and `|` are only matched when followed by `(`, so everyday values
  * like "R&D" or "A|B" do NOT trigger a false positive. */
 const LDAP_INJECTION_PATTERN =
-  /([*()\\\x00]|\)\s*\(|\|\s*\(|&\s*\(|!\s*\(|\)\s*\||\)\s*&)/g;
+  /(\)\s*\(|\)\s*\||\)\s*&|\|\s*\(|&\s*\(|!\s*\(|[*\\\x00])/g;
 
 /**
  * Prototype pollution: key names that target JavaScript object prototype chain.

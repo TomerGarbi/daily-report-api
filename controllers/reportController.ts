@@ -15,7 +15,19 @@ import {
   type HourlyWeatherSnapshot,
 } from "../services/externalWeatherService";
 import type { StationFuel } from "../models/Station";
-import type { CreateReportInput, UpdateReportInput, ListReportsQuery } from "../schemas/reportSchemas";
+import type { CreateReportInput, UpdateReportInput, ListReportsQuery, CreateReportFromDbInput, DbSectionQuery } from "../schemas/reportSchemas";
+import {
+  fetchReportDataFromDb,
+  transformDbDataToReportContent,
+  fetchPrivateSectionFromDb,
+  fetchIecSectionFromDb,
+  fetchForecastSectionFromDb,
+  fetchArchiveSectionFromDb,
+  fetchFuelsSectionFromDb,
+  buildStationBucketFromUnits,
+  transformArchiveRow,
+  transformLastYearArchiveRow,
+} from "../services/dbReportService";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -588,4 +600,225 @@ export const getLastYearSameDayHandler = async (
   });
 
   res.status(200).json(payload);
+};
+
+// ─── POST /reports/from-db ────────────────────────────────────────────────────
+
+/**
+ * Create a new report by fetching station/unit operating data for a given date
+ * directly from the SQL database.
+ *
+ * The report `content` is assembled automatically from the SQL data;
+ * the caller only needs to supply metadata (title, description, status).
+ *
+ * Body: CreateReportFromDbInput
+ *
+ * Response 201: created report document
+ * Response 400: validation error, user not found, or no data found in DB for
+ *               the requested date
+ * Response 503: SQL database is unreachable or not configured
+ */
+export const createReportFromDbHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const { title, description, reportDate, status } =
+    req.body as CreateReportFromDbInput;
+  const actor = req.user as AuthenticatedUser;
+
+  // Resolve the target date — default to today when omitted.
+  const targetDate = reportDate
+    ? new Date(`${reportDate}T00:00:00.000Z`)
+    : (() => {
+        const d = new Date();
+        d.setUTCHours(0, 0, 0, 0);
+        return d;
+      })();
+
+  const dateStr = targetDate.toISOString().slice(0, 10);
+
+  logger.info("Fetching report data from SQL DB", "ReportController", {
+    username: actor.username,
+    reportDate: dateStr,
+  });
+
+  // Fetch raw data from the SQL database (stub — not yet implemented).
+  const raw = await fetchReportDataFromDb(targetDate);
+
+  if (!raw) {
+    throw new BadRequestError(
+      `No data found in the SQL database for date ${dateStr}. ` +
+        "Ensure the database is reachable and contains records for this date.",
+      "ReportController",
+    );
+  }
+
+  // Transform the raw SQL data into the report content schema.
+  const content = transformDbDataToReportContent(raw);
+
+  const userId = await resolveUserId(actor.username);
+
+  const report = await Report.create({
+    title,
+    description,
+    content,
+    status,
+    createdBy: { username: actor.username, userId },
+    updatedBy: { username: actor.username, userId },
+  });
+
+  logger.info("Report created from DB data", "ReportController", {
+    reportId: report._id,
+    username: actor.username,
+    reportDate: dateStr,
+  });
+
+  audit.recordSuccess({
+    req,
+    action: status === "published" ? "report.publish" : "report.create",
+    resource: { type: "report", id: report._id.toString(), label: title },
+    after: { title, status, description, source: "db", reportDate: dateStr },
+  });
+
+  res.status(201).json(report);
+};
+
+// ─── GET /reports/db-section ──────────────────────────────────────────────────
+
+/**
+ * Fetch one section's data from the SQL database, transformed and ready
+ * for the frontend to apply directly to the corresponding section of a
+ * report being created or edited.
+ *
+ * Query params:
+ *   - `section`  — "private" | "iec" | "forecast" | "archive" | "fuels"
+ *   - `date`     — ISO "YYYY-MM-DD" (optional, defaults to today)
+ *
+ * Response 200: section payload (shape depends on `section` — see below)
+ * Response 404: no data found in the DB for the requested section / date
+ *
+ * Response shapes per section:
+ *
+ * **private / iec** — fuel-keyed station bucket (frontend normalizes to groups):
+ * ```json
+ * { "gas": { "Station A": [unitRow, ...] }, "solar": { ... } }
+ * ```
+ *
+ * **forecast** — mirrors `ForecastBlock`:
+ * ```json
+ * { "load": { "today": {...}, "tomorrow": {...} }, "weather": { "region": "...", "today": {...}, "tomorrow": {...} } }
+ * ```
+ *
+ * **archive**:
+ * ```json
+ * { "archive": { "date": "...", "dayName": "...", ... }, "lastYearArchive": { ... } }
+ * ```
+ *
+ * **fuels** — array of fuel-inventory rows:
+ * ```json
+ * [{ "id": "...", "stationTag": "...", "fuelType": "mazut", "available": 15000, "bottom": 500, ... }]
+ * ```
+ */
+export const getDbSectionHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const { section, date: dateStr } = req.query as DbSectionQuery;
+
+  const targetDate = dateStr
+    ? new Date(`${dateStr}T00:00:00.000Z`)
+    : (() => {
+        const d = new Date();
+        d.setUTCHours(0, 0, 0, 0);
+        return d;
+      })();
+
+  const resolvedDate = targetDate.toISOString().slice(0, 10);
+
+  logger.info("DB section fetch requested", "ReportController", {
+    section,
+    date: resolvedDate,
+    username: (req.user as AuthenticatedUser).username,
+  });
+
+  switch (section) {
+    case "private": {
+      const units = await fetchPrivateSectionFromDb(targetDate);
+      if (!units) {
+        res.status(404).json({
+          message: `No private station data found in the SQL database for ${resolvedDate}.`,
+        });
+        return;
+      }
+      res.status(200).json(buildStationBucketFromUnits(units));
+      return;
+    }
+
+    case "iec": {
+      const units = await fetchIecSectionFromDb(targetDate);
+      if (!units) {
+        res.status(404).json({
+          message: `No IEC station data found in the SQL database for ${resolvedDate}.`,
+        });
+        return;
+      }
+      res.status(200).json(buildStationBucketFromUnits(units));
+      return;
+    }
+
+    case "forecast": {
+      const data = await fetchForecastSectionFromDb(targetDate);
+      if (!data) {
+        res.status(404).json({
+          message: `No forecast data found in the SQL database for ${resolvedDate}.`,
+        });
+        return;
+      }
+      res.status(200).json(data);
+      return;
+    }
+
+    case "archive": {
+      const data = await fetchArchiveSectionFromDb(targetDate);
+      if (!data) {
+        res.status(404).json({
+          message: `No archive data found in the SQL database for ${resolvedDate}.`,
+        });
+        return;
+      }
+      res.status(200).json({
+        archive:         transformArchiveRow(data.archive),
+        lastYearArchive: data.lastYearArchive
+          ? transformLastYearArchiveRow(data.lastYearArchive)
+          : undefined,
+      });
+      return;
+    }
+
+    case "fuels": {
+      const rows = await fetchFuelsSectionFromDb(targetDate);
+      if (!rows) {
+        res.status(404).json({
+          message: `No fuel inventory data found in the SQL database for ${resolvedDate}.`,
+        });
+        return;
+      }
+      res.status(200).json(
+        rows.map((row) => ({
+          id:          row.id,
+          stationTag:  row.stationTag,
+          stationName: row.stationName,
+          fuelType:    row.fuelType,
+          tankType:    row.tankType,
+          available:   row.available,
+          bottom:      row.bottom,
+        })),
+      );
+      return;
+    }
+
+    default: {
+      res.status(400).json({ message: "Invalid section name." });
+    }
+  }
 };

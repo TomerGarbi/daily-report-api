@@ -78,7 +78,7 @@ const fuelBucketSchema = z.record(z.string(), stationDataSchema).refine(
 const hourString = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Must be HH:MM (24h)");
-
+ 
 const forecastDaySchema = z.object({
   /** Forecasted peak load (MW). */
   value:            z.number().nonnegative(),
@@ -254,8 +254,46 @@ export const listReportsSchema = z.object({
   limit:         z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
+// ─── DB section query ─────────────────────────────────────────────────────────
+
+/**
+ * Query params for `GET /reports/db-section`.
+ */
+export const dbSectionQuerySchema = z.object({
+  section: z.enum(["private", "iec", "forecast", "archive", "fuels"]),
+  /** ISO "YYYY-MM-DD". Defaults to today when omitted. */
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD")
+    .optional(),
+});
+
+export type DbSectionQuery = z.infer<typeof dbSectionQuerySchema>;
+
+// ─── Create from DB ───────────────────────────────────────────────────────────
+
+/**
+ * Request body for `POST /reports/from-db`.
+ * The server fetches live data from the SQL database for `reportDate`
+ * and assembles the report content automatically.
+ */
+export const createReportFromDbSchema = z.object({
+  title:       z.string().min(1, "Title is required").max(200),
+  description: z.string().min(1, "Description is required").max(500),
+  /**
+   * The date to fetch data for (ISO "YYYY-MM-DD").
+   * Defaults to today's date when omitted.
+   */
+  reportDate:  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a date in YYYY-MM-DD format")
+    .optional(),
+  status: z.enum(["draft", "published"]).optional().default("published"),
+});
+
 // ─── Inferred types ───────────────────────────────────────────────────────────
 
-export type CreateReportInput = z.infer<typeof createReportSchema>;
-export type UpdateReportInput = z.infer<typeof updateReportSchema>;
-export type ListReportsQuery  = z.infer<typeof listReportsSchema>;
+export type CreateReportInput        = z.infer<typeof createReportSchema>;
+export type UpdateReportInput        = z.infer<typeof updateReportSchema>;
+export type ListReportsQuery         = z.infer<typeof listReportsSchema>;
+export type CreateReportFromDbInput  = z.infer<typeof createReportFromDbSchema>;
